@@ -1,17 +1,7 @@
-.vscode/**
-.vscode-test/**
-.vscode-test.mjs
-out/**
-src/**
-docs/**
-intent/**
-node_modules/**
-.gitignore
-esbuild.mjs
-eslint.config.mjs
-tsconfig.json
-CLAUDE.md
-CLAUDE.local.md
-**/*.map
-test-fixtures/**
-*.vsix
+# Package only what the extension needs at run time. vsce lets "!" patterns win over the rest.
+**
+!dist/**/*.js
+!media/**
+!package.json
+!README.md
+!LICENSE
