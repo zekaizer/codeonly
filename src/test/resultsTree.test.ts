@@ -167,6 +167,38 @@ suite("results tree pacing", () => {
     assert.ok(!tree.showsResults);
   });
 
+  test("the view counts as showing a file once it has read the tree after the file was added", () => {
+    tree.add(fileResult(0));
+    const [file] = tree.roots();
+    assert.ok(!tree.isShown(file));
+    tree.flush();
+    assert.ok(!tree.isShown(file));
+    tree.getChildren();
+    assert.ok(tree.isShown(file));
+  });
+
+  test("dismissing with flush pushes pending results in the same refresh", () => {
+    tree.add(fileResult(0, 2));
+    tree.flush();
+    const [file] = tree.getChildren();
+    const [line] = tree.getChildren(file);
+    tree.add(fileResult(1));
+    events.length = 0;
+    tree.dismiss(line, true);
+    assert.deepEqual(events, [undefined]);
+    assert.equal(tree.roots().length, 2);
+  });
+
+  test("dismissing a line without flush refreshes only its file", () => {
+    tree.add(fileResult(0, 2));
+    tree.flush();
+    const [file] = tree.getChildren();
+    const [line] = tree.getChildren(file);
+    tree.add(fileResult(1));
+    events.length = 0;
+    tree.dismiss(line);
+    assert.deepEqual(events, [file]);
+  });
 });
 
 suite("results view status", () => {

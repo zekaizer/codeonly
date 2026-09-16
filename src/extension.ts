@@ -2,7 +2,14 @@ import * as vscode from "vscode";
 import type { CodeOnlyApi, ResultEntry } from "./api";
 import { MatchHighlights } from "./ui/matchHighlights";
 import { QUERY_VIEW_ID, QueryViewProvider } from "./ui/queryView";
-import { type OpenResultArgs, type ResultNode, ResultsTree, isResultNode, openArgs } from "./ui/resultsTree";
+import {
+  type LineNode,
+  type OpenResultArgs,
+  type ResultNode,
+  ResultsTree,
+  isResultNode,
+  openArgs,
+} from "./ui/resultsTree";
 import { RESULTS_VIEW_ID, SearchController } from "./ui/searchController";
 import * as settings from "./ui/settings";
 
@@ -21,6 +28,14 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const target = (node: unknown): ResultNode | undefined =>
     isResultNode(node) ? node : treeView.selection[0];
 
+  const reveal = async (node: LineNode) => {
+    try {
+      await treeView.reveal(node, { select: true, focus: false });
+    } catch {
+      // VS Code cannot resolve the item when a refresh starts meanwhile; the editor still opens.
+    }
+  };
+
   const open = async (args: OpenResultArgs, sideBySide = false) => {
     const line = args.line - 1;
     const uri = vscode.Uri.file(args.path);
@@ -38,7 +53,11 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const step = async (direction: 1 | -1) => {
     const next = tree.neighbor(treeView.selection[0], direction);
     if (next) {
-      await treeView.reveal(next, { select: true, focus: false });
+      // The view can only select a result it has read.
+      if (!tree.isShown(next.file)) {
+        tree.flush();
+      }
+      await reveal(next);
       await open(openArgs(next));
     }
   };
@@ -96,12 +115,10 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       const selected = treeView.selection[0];
       const holdsSelection = selected === n || (n.kind === "file" && selected?.kind === "line" && selected.file === n);
       const next = holdsSelection ? tree.successor(n) : undefined;
-      tree.dismiss(n);
+      tree.dismiss(n, next !== undefined && !tree.isShown(next.file));
       controller.resultsChanged();
       if (next && !tree.isEmpty) {
-        // The successor may belong to a file added during a search and not yet shown.
-        tree.flush();
-        await treeView.reveal(next, { select: true, focus: false });
+        await reveal(next);
         // The reveal waits for the refresh; a new search may have replaced the results meanwhile.
         if (tree.contains(next)) {
           await open(openArgs(next));

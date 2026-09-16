@@ -85,6 +85,8 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   /** When the view last read the root, and when it last read anything. */
   private rootReadAt = Date.now();
   private lastReadAt = this.rootReadAt;
+  /** Files as of the view's last read of the tree. */
+  private shown = new Set<FileNode>();
   private shownAny = false;
 
   constructor(private readonly collapseMode: () => CollapseMode) {}
@@ -116,6 +118,11 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   /** Whether the last refresh pushed to the view had results. */
   get showsResults(): boolean {
     return this.shownAny;
+  }
+
+  /** Whether the view has read the tree since `file` was added. */
+  isShown(file: FileNode): boolean {
+    return this.shown.has(file);
   }
 
   /**
@@ -198,7 +205,11 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return this.lastReadAt + Math.max(MIN_REFRESH_PAUSE_MS, REFRESH_PAUSE_FACTOR * took);
   }
 
-  dismiss(node: ResultNode): void {
+  /**
+   * Removes `node`. With `flush`, pending results are pushed in the same refresh: VS Code waits
+   * only for the first refresh of a batch before it reveals an item.
+   */
+  dismiss(node: ResultNode, flush = false): void {
     const file = node.kind === "file" ? node : node.file;
     if (this.files.get(file.result.absolutePath) !== file) {
       return;
@@ -209,6 +220,8 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     if (node.kind === "file" || file.lines.length === 0) {
       this.files.delete(file.result.absolutePath);
       this.sorted = undefined;
+      this.refresh();
+    } else if (flush && this.pending) {
       this.refresh();
     } else {
       this.changed.fire(file);
@@ -266,8 +279,10 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     if (!node) {
       this.awaitingRead = false;
       this.rootReadAt = this.lastReadAt;
+      const roots = this.roots();
+      this.shown = new Set(roots);
       this.schedule();
-      return this.roots();
+      return roots;
     }
     return node.kind === "file" ? node.lines : [];
   }
