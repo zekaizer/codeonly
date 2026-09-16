@@ -255,6 +255,18 @@ suite("results view status", () => {
     assert.ok(!messages.includes("Searching…"), JSON.stringify(messages));
   });
 
+  test("the results view says when the result limit cut the list", async () => {
+    const search = vscode.workspace.getConfiguration("search");
+    await search.update("maxResults", 2, vscode.ConfigurationTarget.Global);
+    try {
+      const summary = await controller.search({ ...EMPTY_FORM, isCaseSensitive: true, pattern: "widget_init" }, false);
+      assert.ok(summary?.limitHit);
+    } finally {
+      await search.update("maxResults", undefined, vscode.ConfigurationTarget.Global);
+    }
+    assert.equal(messages.at(-1), "Only the first 2 results are shown.");
+  });
+
   test("hidden lines go to their own output, replaced on each search, not to the rotating log", async () => {
     const config = vscode.workspace.getConfiguration("codeonly");
     await config.update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);

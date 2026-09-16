@@ -434,7 +434,15 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         message = s.matchCount === 0 && !this.tree.showsResults ? "Searching…" : undefined;
         break;
       case "done":
-        message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;
+        // The query view's status line may be cut off in a short pane, so the limit is repeated here.
+        message =
+          s.matchCount === 0
+            ? s.cancelled
+              ? "Search stopped."
+              : "No results found."
+            : s.limitHit
+              ? `Only the first ${(s.maxResults ?? s.matchCount).toLocaleString()} results are shown.`
+              : undefined;
         description =
           s.matchCount === 0
             ? undefined
