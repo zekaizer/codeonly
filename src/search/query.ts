@@ -41,3 +41,36 @@ export function splitGlobList(input: string): string[] {
   }
   return out;
 }
+
+/**
+ * Resolves a multi-root include list for one folder. `./<folder name>/rest` applies to that folder
+ * only, as in the Search view. Returns undefined if the list targets other folders only.
+ */
+export function scopeIncludes(
+  includes: readonly string[],
+  folderName: string,
+  folderNames: ReadonlySet<string>,
+): string[] | undefined {
+  const out: string[] = [];
+  let wholeFolder = false;
+  let otherFolder = false;
+  for (const glob of includes) {
+    const m = /^\.[/\\]([^/\\]+)(?:[/\\](.*))?$/.exec(glob);
+    if (!m || !folderNames.has(m[1])) {
+      out.push(glob);
+    } else if (m[1] !== folderName) {
+      otherFolder = true;
+    } else if (m[2]) {
+      out.push(`./${m[2]}`);
+    } else {
+      wholeFolder = true;
+    }
+  }
+  if (wholeFolder) {
+    return [];
+  }
+  if (out.length === 0 && otherFolder) {
+    return undefined;
+  }
+  return out;
+}
