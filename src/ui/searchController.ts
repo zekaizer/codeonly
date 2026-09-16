@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import { type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
+import { type SearchQuery, escapeGlob, scopeIncludes, splitGlobList } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
 import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
 import { makePreview } from "./preview";
@@ -275,16 +275,29 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.view?.focusInput();
   }
 
-  async findInFolder(uri: vscode.Uri): Promise<void> {
-    const folder = vscode.workspace.getWorkspaceFolder(uri);
-    if (!folder) {
+  /** Scopes the query to `uris` (Explorer selection), each relative to its workspace folder. */
+  async findInFolder(uris: readonly vscode.Uri[]): Promise<void> {
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const scopes: string[] = [];
+    for (const uri of uris) {
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (!folder) {
+        continue;
+      }
+      const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
+      const parts = [multiRoot ? folder.name : undefined, rel || undefined].filter((p): p is string => !!p);
+      if (parts.length === 0) {
+        // The folder root itself: no restriction.
+        scopes.length = 0;
+        break;
+      }
+      scopes.push(`./${escapeGlob(parts.join("/"))}`);
+    }
+    if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
       return;
     }
-    const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
-    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
-    const scope = [multiRoot ? folder.name : undefined, rel || undefined].filter(Boolean).join("/");
-    this.setForm({ ...this.form, includes: scope ? `./${scope}` : "", showDetails: true }, true);
+    this.setForm({ ...this.form, includes: scopes.join(", "), showDetails: true }, true);
     await vscode.commands.executeCommand("codeonly.query.focus");
     this.view?.focusInput();
     if (this.form.pattern) {

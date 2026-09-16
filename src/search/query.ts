@@ -20,14 +20,28 @@ export interface FolderOptions {
   readonly smartCase: boolean;
 }
 
-/** Splits a comma-separated glob list, keeping commas inside `{}` groups. */
+/** Escapes glob syntax in a literal path, so that it can go into a glob list. */
+export function escapeGlob(path: string): string {
+  return path.replace(/[,{}[\]*?]/g, "[$&]");
+}
+
+/** Splits a comma-separated glob list, keeping commas inside `{}` groups and `[]` classes. */
 export function splitGlobList(input: string): string[] {
   const out: string[] = [];
   let depth = 0;
+  let classStart = -1;
   let start = 0;
   for (let i = 0; i <= input.length; i++) {
     const ch = input[i];
-    if (ch === "{") {
+    if (classStart >= 0) {
+      // A `]` first in the class (after an optional `!` or `^`) is a member, as in `[]]`.
+      const first = /[!^]/.test(input[classStart + 1] ?? "") ? classStart + 2 : classStart + 1;
+      if (ch === "]" && i > first) {
+        classStart = -1;
+      }
+    } else if (ch === "[") {
+      classStart = i;
+    } else if (ch === "{") {
       depth++;
     } else if (ch === "}" && depth > 0) {
       depth--;

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { type FolderOptions, type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
+import { type FolderOptions, type SearchQuery, escapeGlob, scopeIncludes, splitGlobList } from "../search/query";
 import { buildRipgrepArgs, locateRipgrep, ripgrepCandidates } from "../search/ripgrep";
 
 const folder: FolderOptions = {
@@ -134,7 +134,13 @@ suite("ripgrep arguments", () => {
 
   test("glob lists split on top-level commas", () => {
     assert.deepEqual(splitGlobList(" a, {b,c}/** ,, d "), ["a", "{b,c}/**", "d"]);
+    assert.deepEqual(splitGlobList("x[,]y, z"), ["x[,]y", "z"]);
     assert.deepEqual(splitGlobList(""), []);
+  });
+
+  test("paths are escaped for use as globs", () => {
+    assert.equal(escapeGlob("a,b/{c}/[d]*?"), "a[,]b/[{]c[}]/[[]d[]][*][?]");
+    assert.deepEqual(splitGlobList(`./${escapeGlob("x,y")}, ./z`), ["./x[,]y", "./z"]);
   });
 });
 

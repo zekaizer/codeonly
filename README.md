@@ -42,7 +42,7 @@ hidden.
 
 The *include* and *exclude* boxes take the same patterns as VS Code's Search
 view, for example `*.c, ./drivers/gpu` or `**/tests/**`. You can also
-right-click a folder in the Explorer and choose
+right-click one or more folders in the Explorer and choose
 **Find Code in Folder (Exclude Comments)...**.
 
 | In the results | |

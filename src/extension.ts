@@ -55,9 +55,9 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     treeView.onDidChangeVisibility(() => highlights.update()),
     vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
     vscode.commands.registerCommand("codeonly.focusSearch", () => controller.focusSearch()),
-    vscode.commands.registerCommand("codeonly.findInFolder", (uri?: vscode.Uri) => {
-      const folder = uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
-      return folder ? controller.findInFolder(folder) : undefined;
+    vscode.commands.registerCommand("codeonly.findInFolder", (uri?: vscode.Uri, selected?: vscode.Uri[]) => {
+      const uris = selected?.length ? selected : uri ? [uri] : [];
+      return uris.length > 0 ? controller.findInFolder(uris) : undefined;
     }),
     vscode.commands.registerCommand("codeonly.rerun", () => controller.rerun()),
     vscode.commands.registerCommand("codeonly.cancel", () => controller.onCancel()),

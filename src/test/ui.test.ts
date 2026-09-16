@@ -176,6 +176,14 @@ suite("search UI", () => {
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 
+  test("find in folder takes every selected folder", async () => {
+    const src = vscode.Uri.file(path.join(FIXTURE, "src"));
+    const docs = vscode.Uri.file(path.join(FIXTURE, "docs"));
+    await vscode.commands.executeCommand("codeonly.findInFolder", src, [src, docs]);
+    assert.equal(api.form().includes, "./src, ./docs");
+    await api.search({ includes: "" });
+  });
+
   test("highlights follow dismissals and clear with the results", async () => {
     await vscode.commands.executeCommand("codeonly.results.focus");
     await api.search({ ...base, pattern: "widget_count" });
