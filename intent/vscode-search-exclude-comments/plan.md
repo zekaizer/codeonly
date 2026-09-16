@@ -27,14 +27,14 @@ The search and classification modules do not import `vscode`, so they are unit-t
 4. `chore/packaging` — README and VSIX packaging.
 
 ## 5. Verification
-| ID    | Check |
-|-------|-------|
-| R1'   | Integration test: fixture line with the term only in a comment is absent. |
-| R2    | Integration test: `foo(); /* foo */` line is present. |
-| R3    | Integration test: code line inside `#if 0` is present. |
-| R4    | Integration test: lines after an unterminated `/*` are absent. |
-| R5    | Integration test: activating a result opens the file with the cursor on that line. |
-| IC1   | Integration test: result entry carries path, line number, and original line text. |
-| NFR2  | Integration test: excluded list holds the R1' line with reason `comment-only match`. |
-| NFR1' | Benchmark: three symbols on the android16-6.12 tree, warm cache, under D2. |
-| R7    | Bundled ripgrep path resolves in the installed VS Code server layout; end-to-end check over Remote-SSH by the user. |
+| ID    | Check | Result (2026-09-17) |
+|-------|-------|---------------------|
+| R1'   | Integration test: fixture line with the term only in a comment is absent. | pass |
+| R2    | Integration test: `foo(); /* foo */` line is present. | pass |
+| R3    | Integration test: code line inside `#if 0` is present. | pass |
+| R4    | Integration test: lines after an unterminated `/*` are absent. | pass |
+| R5    | Integration test: activating a result opens the file with the cursor on that line. | pass |
+| IC1   | Integration test: result entry carries path, line number, and original line text. | pass |
+| NFR2  | Integration test: excluded list holds the R1' line with reason `comment-only match`. | pass |
+| NFR1' | Benchmark: three symbols on the android16-6.12 tree, warm cache, under D2. | pass: `struct device` 3.06 s, `mutex_lock` 1.71 s, `kmalloc` 1.13 s without a result limit |
+| R7    | Bundled ripgrep path resolves in the installed VS Code server layout; end-to-end check over Remote-SSH by the user. | path resolves for servers 1.129–1.138; Remote-SSH check pending |
