@@ -191,6 +191,19 @@ suite("search UI", () => {
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 
+  test("an unsaved document gets no highlights, since the search read the file on disk", async () => {
+    await vscode.commands.executeCommand("codeonly.results.focus");
+    const uri = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(uri);
+    await editor.edit((b) => b.insert(new vscode.Position(0, 0), "\n"));
+    try {
+      await api.search({ ...base, pattern: "widget_count" });
+      assert.deepEqual(api.highlightedRanges(uri), []);
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.files.revert");
+    }
+  });
+
   test("dismissing every result returns to the idle state", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     for (const entry of await api.resultTree()) {
