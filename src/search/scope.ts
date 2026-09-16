@@ -142,9 +142,12 @@ function normalizePattern(pattern: string): string {
   return toSlash(pattern).replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
+/** Drops trailing separators, but keeps a file-system root such as `/` or `C:\\`. */
 function trimSeparators(p: string): string {
-  const trimmed = p.replace(/[\\/]+$/, "");
-  return trimmed || p;
+  if (path.parse(p).root === p) {
+    return p;
+  }
+  return p.replace(/[\\/]+$/, "");
 }
 
 function samePath(a: string, b: string): boolean {
