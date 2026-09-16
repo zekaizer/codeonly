@@ -249,12 +249,23 @@ function truncate(lines: readonly ResultLine[], room: number): ResultLine[] {
   return kept;
 }
 
+type Submatch = RipgrepLine["submatches"][number];
+
+/** ripgrep sends no submatch for an empty match at the end of a last line without a terminator. */
+function matchesOf(line: RipgrepLine): readonly Submatch[] {
+  if (line.submatches.length > 0) {
+    return line.submatches;
+  }
+  const end = line.bytes.length - eolLength(line.bytes);
+  return [{ start: end, end }];
+}
+
 async function processFile(folder: string, file: RipgrepFile): Promise<FileResult> {
   const relativePath = file.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
   const absolutePath = path.join(folder, relativePath);
   const base = { folder, relativePath, absolutePath };
   if (!isCFamilyFile(relativePath)) {
-    return { ...base, filtered: false, lines: file.lines.map((l) => toResultLine(l, l.submatches)), excluded: [] };
+    return { ...base, filtered: false, lines: file.lines.map((l) => toResultLine(l, matchesOf(l))), excluded: [] };
   }
 
   let buf: Buffer;
@@ -272,9 +283,8 @@ async function processFile(folder: string, file: RipgrepFile): Promise<FileResul
 
   let limit = 0;
   for (const l of file.lines) {
-    const last = l.submatches[l.submatches.length - 1];
-    if (last) {
-      limit = Math.max(limit, shift + l.absoluteOffset + last.end);
+    for (const m of matchesOf(l)) {
+      limit = Math.max(limit, shift + l.absoluteOffset + Math.max(m.end, m.start + 1));
     }
   }
   const regions = scanRegions(buf, limit);
@@ -287,10 +297,19 @@ async function processFile(folder: string, file: RipgrepFile): Promise<FileResul
       excluded.push(toExcludedLine(l, CHANGED));
       continue;
     }
-    const classes = l.submatches.map((m) => classifyRange(regions, at + m.start, at + m.end));
+    const matches = matchesOf(l);
+    const lineEnd = at + l.bytes.length - eolLength(l.bytes);
+    const classes = matches.map((m) => {
+      if (m.end > m.start) {
+        return classifyRange(regions, at + m.start, at + m.end);
+      }
+      // An empty match at a line end belongs to what ends there, e.g. a line comment.
+      const p = at + m.start >= lineEnd && m.start > 0 ? at + m.start - 1 : at + m.start;
+      return classifyRange(regions, p, p + 1);
+    });
     const decision = decideLine(classes);
     if (decision.include) {
-      lines.push(toResultLine(l, l.submatches.filter((_, i) => classes[i].kind === "code")));
+      lines.push(toResultLine(l, matches.filter((_, i) => classes[i].kind === "code")));
     } else {
       excluded.push(toExcludedLine(l, decision.reason ?? REASON_COMMENT_ONLY));
     }
@@ -302,7 +321,7 @@ function excludeAll(base: Pick<FileResult, "folder" | "relativePath" | "absolute
   return { ...base, filtered: true, lines: [], excluded: file.lines.map((l) => toExcludedLine(l, reason)) };
 }
 
-function toResultLine(line: RipgrepLine, submatches: RipgrepLine["submatches"]): ResultLine {
+function toResultLine(line: RipgrepLine, submatches: readonly Submatch[]): ResultLine {
   const text = lineText(line.bytes);
   const ascii = text.length === line.bytes.length - eolLength(line.bytes);
   const column = (byteOffset: number) =>

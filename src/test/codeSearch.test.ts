@@ -321,4 +321,22 @@ suite("code search pipeline edge cases", () => {
     }
   });
 
+  test("empty matches are classified at their position, including line ends", async () => {
+    const dir = workspace({ "e.c": "int x;\n// only comment\nint y;\n// last", "e.txt": "a\nb" });
+    const start = await run(dir, "^", { isRegExp: true });
+    assert.deepEqual(shown(start, "e.c"), [1, 3]);
+    assert.deepEqual(
+      hidden(start, "e.c").map(([line]) => line),
+      [2, 4],
+    );
+    const end = await run(dir, "$", { isRegExp: true });
+    assert.deepEqual(shown(end, "e.c"), [1, 3]);
+    assert.deepEqual(
+      hidden(end, "e.c").map(([line]) => line),
+      [2, 4],
+    );
+    assert.deepEqual(shown(end, "e.txt"), [1, 2]);
+    assert.equal(end.summary.matchCount, 4);
+  });
+
 });
