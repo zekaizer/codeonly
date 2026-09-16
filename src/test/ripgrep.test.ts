@@ -145,6 +145,9 @@ suite("ripgrep arguments", () => {
   test("glob lists split on top-level commas", () => {
     assert.deepEqual(splitGlobList(" a, {b,c}/** ,, d "), ["a", "{b,c}/**", "d"]);
     assert.deepEqual(splitGlobList("x[,]y, z"), ["x[,]y", "z"]);
+    // An unclosed class keeps the rest, so ripgrep can report the bad glob.
+    assert.deepEqual(splitGlobList("src/["), ["src/["]);
+    assert.deepEqual(splitGlobList("*.c, build[, x"), ["*.c", "build[, x"]);
     assert.deepEqual(splitGlobList(""), []);
   });
 
