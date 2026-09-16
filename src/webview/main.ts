@@ -46,6 +46,12 @@ let history: string[] = [];
 let historyIndex = -1;
 let draft = "";
 let debounce: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Inputs typed into before the extension's state arrived. Over a remote connection that state can
+ * arrive after the user started typing, and must not overwrite what they typed.
+ */
+const editedBeforeInit = new Set<HTMLInputElement>();
+let initialized = false;
 
 render(((vscode.getState() as { form?: QueryForm } | undefined)?.form) ?? EMPTY_FORM);
 
@@ -161,6 +167,9 @@ function focusPattern(): void {
 
 for (const input of [pattern, includes, excludes]) {
   input.addEventListener("input", () => {
+    if (!initialized) {
+      editedBeforeInit.add(input);
+    }
     if (input === pattern) {
       historyIndex = -1;
     }
@@ -249,12 +258,25 @@ window.addEventListener("focus", () => {
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   const message = event.data;
   switch (message.type) {
-    case "init":
+    case "init": {
       config = message.config;
       history = [...message.history];
-      render(message.form);
+      const typed = (input: HTMLInputElement, value: string) => (editedBeforeInit.has(input) ? input.value : value);
+      render({
+        ...message.form,
+        pattern: typed(pattern, message.form.pattern),
+        includes: typed(includes, message.form.includes),
+        excludes: typed(excludes, message.form.excludes),
+      });
       renderStatus(message.status);
+      initialized = true;
+      document.body.dataset.ready = "true";
+      if (editedBeforeInit.size > 0) {
+        editedBeforeInit.clear();
+        edited();
+      }
       break;
+    }
     case "form":
       render(message.form);
       if (message.focus) {
