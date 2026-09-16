@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as readline from "node:readline";
+import type { Readable } from "node:stream";
 import type { FolderOptions, SearchQuery } from "./query";
 
 /**
@@ -298,9 +298,8 @@ export async function runRipgrep(
   const kill = () => child.kill();
   signal?.addEventListener("abort", kill);
   try {
-    const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     let current: RipgrepFile | undefined;
-    for await (const line of lines) {
+    for await (const line of splitLines(child.stdout)) {
       const message = parseMessage(line);
       if (message?.type === "begin") {
         current = { path: decodeData(message.data.path), lines: [] };
@@ -321,6 +320,29 @@ export async function runRipgrep(
     throw e;
   } finally {
     signal?.removeEventListener("abort", kill);
+  }
+}
+
+/**
+ * Splits output on `\n` only. readline also splits on U+2028 and U+2029, which ripgrep's JSON
+ * leaves unescaped inside strings.
+ */
+async function* splitLines(stream: Readable): AsyncGenerator<string> {
+  const parts: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer>) {
+    let start = 0;
+    for (let nl = chunk.indexOf(0x0a); nl >= 0; nl = chunk.indexOf(0x0a, start)) {
+      parts.push(chunk.subarray(start, nl));
+      yield (parts.length === 1 ? parts[0] : Buffer.concat(parts)).toString("utf8");
+      parts.length = 0;
+      start = nl + 1;
+    }
+    if (start < chunk.length) {
+      parts.push(chunk.subarray(start));
+    }
+  }
+  if (parts.length > 0) {
+    yield Buffer.concat(parts).toString("utf8");
   }
 }
 

@@ -1,5 +1,6 @@
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { REASON_COMMENT_ONLY } from "../classify/lineDecision";
@@ -215,4 +216,57 @@ suite("code search pipeline", () => {
     assert.equal(o.summary.cancelled, true);
     assert.equal(o.results.size, 0);
   });
+});
+
+suite("code search pipeline edge cases", () => {
+  const dirs: string[] = [];
+
+  function workspace(files: Record<string, string>): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeonly-ws-"));
+    dirs.push(dir);
+    for (const [name, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      fs.writeFileSync(path.join(dir, name), content);
+    }
+    return dir;
+  }
+
+  async function run(
+    dir: string,
+    pattern: string,
+    overrides: Partial<SearchQuery> = {},
+    onResult?: (r: FileResult) => void,
+  ): Promise<Outcome> {
+    const results = new Map<string, FileResult>();
+    const summary = await searchCode({
+      rgPath,
+      query: { pattern, isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [], ...overrides },
+      folders: [{ path: dir, options }],
+      onResult: (r) => {
+        results.set(r.relativePath, r);
+        onResult?.(r);
+      },
+    });
+    return { results, summary };
+  }
+
+  suiteSetup(async () => {
+    const found = await locateRipgrep(vscode.env.appRoot);
+    assert.ok(found);
+    rgPath = found;
+  });
+
+  suiteTeardown(() => {
+    for (const dir of dirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a line containing U+2028 is still reported", async () => {
+    const dir = workspace({ "a.c": "int a;  int widget_sep;\n", "b.txt": "x  widget_sep\n" });
+    const o = await run(dir, "widget_sep");
+    assert.deepEqual(shown(o, "a.c"), [1]);
+    assert.deepEqual(shown(o, "b.txt"), [1]);
+  });
+
 });
