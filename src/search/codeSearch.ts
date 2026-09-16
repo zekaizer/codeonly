@@ -195,7 +195,7 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
 }
 
 /** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
-const NEWLINE_ESCAPE = /^(?:n|x0a|x\{0*a\}|u000a|u\{0*a\}|U0000000a|U\{0*a\}|012|o\{0*12\}|cj)/i;
+const NEWLINE_ESCAPE = /^(?:n|x0[aA]|x\{0*[aA]\}|u000[aA]|u\{0*[aA]\}|U0000000[aA]|U\{0*[aA]\}|012|o\{0*12\}|c[jJ])/;
 
 /**
  * Results are per line, so a pattern that must match a newline would silently find nothing.

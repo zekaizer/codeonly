@@ -351,6 +351,11 @@ suite("code search pipeline edge cases", () => {
     assert.equal(end.summary.matchCount, 4);
   });
 
+  test("a PCRE2-only escape is not taken for a newline", async () => {
+    const dir = workspace({ "a.c": "int widget_nl;\n" });
+    assert.deepEqual(shown(await run(dir, "widget\\N", { isRegExp: true }), "a.c"), [1]);
+  });
+
   test("a file name that is not UTF-8 is still read", async function () {
     if (process.platform !== "linux") {
       this.skip();
