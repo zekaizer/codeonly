@@ -206,6 +206,16 @@ suite("search UI", () => {
     }
   });
 
+  test("opening the same result twice keeps the editor and moves focus to it", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    const command = fileEntry(await api.resultTree(), "src/main.c").children[1].item.command;
+    assert.ok(command);
+    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
+    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, true);
+    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
+    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, false);
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");

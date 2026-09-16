@@ -45,8 +45,9 @@ view, for example `*.c, ./drivers/gpu` or `**/tests/**`. You can also
 right-click one or more folders in the Explorer and choose
 **Find Code in Folder (Exclude Comments)...**.
 
-In the results, click a line or press `Enter` to open the file with the match
-selected. `Ctrl+Up` (`Cmd+Up` on macOS) goes back to the search box.
+In the results, click a line or press `Enter` to preview the file with the
+match selected; do it again (or double-click) to keep the file open and move
+to the editor. `Ctrl+Up` (`Cmd+Up` on macOS) goes back to the search box.
 Hover a result and click **×** to dismiss it. Right-click a result
 for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
