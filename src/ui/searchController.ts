@@ -152,6 +152,9 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.abort = abort;
     const logHidden = settings.logExcludedLines();
     const hidden: HiddenLine[] = [];
+    // Nested workspace folders report the same file once per folder; count it once.
+    const seen = new Set<string>();
+    let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
     const folderNames = new Set(names.values());
@@ -184,9 +187,11 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }, PROGRESS_INTERVAL_MS);
 
     const onResult = (result: FileResult) => {
-      if (id !== this.runId) {
+      if (id !== this.runId || seen.has(result.absolutePath)) {
         return;
       }
+      seen.add(result.absolutePath);
+      hiddenLineCount += result.excluded.length;
       this.tree.add(result);
       if (logHidden) {
         const location = multiRoot ? `${names.get(result.folder)}/${result.relativePath}` : result.relativePath;
@@ -205,13 +210,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         return undefined;
       }
       this.tree.refresh();
-      const counts = this.tree.counts();
       this.setStatus({
         kind: "done",
-        matchCount: summary.matchCount,
-        fileCount: summary.fileCount,
-        hiddenLineCount: summary.excludedLineCount,
-        unfilteredFileCount: counts.unfilteredFileCount,
+        ...this.tree.counts(),
+        hiddenLineCount,
         limitHit: summary.limitHit,
         maxResults,
         durationMs: summary.durationMs,
@@ -260,7 +262,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   /** Called after the tree changed outside a search, e.g. a dismissed result. */
   resultsChanged(): void {
-    if (this.status.kind === "done") {
+    if (this.status.kind === "done" && this.tree.isEmpty) {
+      this.report = [];
+      this.setStatus({ kind: "idle" });
+    } else if (this.status.kind === "done") {
       this.setStatus({ ...this.status, ...this.tree.counts() });
     } else {
       this.updateContext();

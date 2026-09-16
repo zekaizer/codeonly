@@ -176,6 +176,28 @@ suite("search UI", () => {
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 
+  test("dismissing every result returns to the idle state", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    for (const entry of await api.resultTree()) {
+      await vscode.commands.executeCommand("codeonly.dismiss", entry.node);
+    }
+    assert.deepEqual(await api.resultTree(), []);
+    assert.equal(api.status().kind, "idle");
+    assert.equal(api.form().pattern, "widget_count");
+  });
+
+  test("status counts follow dismissals", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.dismiss", fileEntry(await api.resultTree(), "Makefile").node);
+    const status = api.status();
+    assert.equal(status.kind, "done");
+    if (status.kind === "done") {
+      assert.equal(status.matchCount, 3);
+      assert.equal(status.fileCount, 2);
+      assert.equal(status.unfilteredFileCount, 1);
+    }
+  });
+
   test("find in folder takes every selected folder", async () => {
     const src = vscode.Uri.file(path.join(FIXTURE, "src"));
     const docs = vscode.Uri.file(path.join(FIXTURE, "docs"));
