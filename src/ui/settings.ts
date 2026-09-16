@@ -16,6 +16,8 @@ export function folderOptions(uri: vscode.Uri): FolderOptions {
     useGlobalIgnoreFiles: search.get<boolean>("useGlobalIgnoreFiles", false),
     followSymlinks: search.get<boolean>("followSymlinks", true),
     smartCase: search.get<boolean>("smartCase", false),
+    // VS Code decides this by the client OS; the file system's case rules are those of this host.
+    ignoreGlobCase: process.platform !== "linux",
   };
 }
 

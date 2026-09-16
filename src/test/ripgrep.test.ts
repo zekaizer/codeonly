@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { type FolderOptions, type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
+import { type FolderOptions, type SearchQuery, escapeGlob, splitGlobList } from "../search/query";
 import { buildRipgrepArgs, locateRipgrep, ripgrepCandidates } from "../search/ripgrep";
 
 const folder: FolderOptions = {
@@ -13,6 +13,7 @@ const folder: FolderOptions = {
   useGlobalIgnoreFiles: false,
   followSymlinks: true,
   smartCase: false,
+  ignoreGlobCase: false,
 };
 
 function query(pattern: string, overrides: Partial<SearchQuery> = {}): SearchQuery {
@@ -82,10 +83,11 @@ suite("ripgrep arguments", () => {
 
   test("include and exclude globs follow VS Code's expansion", () => {
     const args = buildRipgrepArgs(
-      query("foo", { includes: ["./drivers/", "*.c"], excludes: ["build"] }),
+      query("foo", { includes: ["drivers", "drivers/**", "**/*.c", "**/*.c/**"], excludes: ["**/build", "**/build/**"] }),
       { ...folder, excludes: ["**/.git", "out", "/abs/"] },
     );
     assert.deepEqual(globs(args), [
+      "!*",
       "/drivers",
       "/drivers/**",
       "**/*.c",
@@ -96,6 +98,33 @@ suite("ripgrep arguments", () => {
       "!**/build",
       "!**/build/**",
     ]);
+  });
+
+  test("folder-relative includes list every parent so ripgrep can prune other directories", () => {
+    const args = buildRipgrepArgs(
+      query("foo", { includes: ["drivers/{gpu,media}", "drivers/{gpu,media}/**", "fs/ext4/*.c", "fs/ext4/*.c/**"] }),
+      folder,
+    );
+    assert.deepEqual(globs(args), [
+      "!*",
+      "/drivers",
+      "/drivers/gpu",
+      "/drivers/media",
+      "/drivers/gpu/**",
+      "/drivers/media/**",
+      "/fs",
+      "/fs/ext4",
+      "/fs/ext4/*.c",
+      "/fs/ext4/*.c/**",
+      "!**/.git",
+    ]);
+    assert.ok(!globs(buildRipgrepArgs(query("foo", { includes: ["**/*.c"] }), folder)).includes("!*"));
+  });
+
+  test("glob case follows the host file system", () => {
+    const insensitive = buildRipgrepArgs(query("foo"), { ...folder, ignoreGlobCase: true });
+    assert.deepEqual(insensitive.slice(2, 5), ["--ignore-case", "--glob-case-insensitive", "--ignore-file-case-insensitive"]);
+    assert.ok(!buildRipgrepArgs(query("foo"), folder).includes("--glob-case-insensitive"));
   });
 
   test("ignore-file and symlink settings", () => {
@@ -115,7 +144,13 @@ suite("ripgrep arguments", () => {
 
   test("glob lists split on top-level commas", () => {
     assert.deepEqual(splitGlobList(" a, {b,c}/** ,, d "), ["a", "{b,c}/**", "d"]);
+    assert.deepEqual(splitGlobList("x[,]y, z"), ["x[,]y", "z"]);
     assert.deepEqual(splitGlobList(""), []);
+  });
+
+  test("paths are escaped for use as globs", () => {
+    assert.equal(escapeGlob("a,b/{c}/[d]*?"), "a[,]b/[{]c[}]/[[]d[]][*][?]");
+    assert.deepEqual(splitGlobList(`./${escapeGlob("x,y")}, ./z`), ["./x[,]y", "./z"]);
   });
 });
 
@@ -159,23 +194,3 @@ suite("ripgrep location", () => {
   });
 });
 
-suite("multi-root include scoping", () => {
-  const names = new Set(["a", "b"]);
-
-  test("folder-prefixed globs apply to their folder only", () => {
-    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "a", names), ["./src", "*.c"]);
-    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "b", names), ["*.c"]);
-  });
-
-  test("a folder targeted only elsewhere is skipped", () => {
-    assert.equal(scopeIncludes(["./a/src"], "b", names), undefined);
-  });
-
-  test("a bare folder prefix includes the whole folder", () => {
-    assert.deepEqual(scopeIncludes(["./a", "./b/x"], "a", names), []);
-  });
-
-  test("relative globs that do not name a folder are kept", () => {
-    assert.deepEqual(scopeIncludes(["./src"], "a", names), ["./src"]);
-  });
-});

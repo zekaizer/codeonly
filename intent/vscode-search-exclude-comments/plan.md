@@ -10,7 +10,7 @@ Out: R6 (Could). Comment classification uses C syntax only, applied to the C-fam
 - D2 → 10 s, warm page cache (spec D2). Basis: U3 — ripgrep alone takes 0.47 s warm / 3.5 s cold for `struct device` on an 87k-file kernel tree.
 - D3 → Output panel, `CodeOnly` log channel, enabled by a setting (spec D3).
 - PD1. Files outside the C-family set are listed unfiltered and marked "unfiltered". Hiding them would silently drop Kconfig, Makefile, and defconfig usages, which conflicts with the visibility goal behind C1.
-- PD2. C-family set: `.c .h`, C++ (`.cc .cpp .cxx .hh .hpp .hxx .inl`), preprocessed assembly (`.S`), devicetree (`.dts .dtsi .dtso`). All of these pass through the C preprocessor, so C comment syntax is exact for them.
+- PD2. C-family set: `.c .h`, C++ (`.cc .cpp .cxx .hh .hpp .hxx .inl`), preprocessed assembly (`.S`), devicetree (`.dts .dtsi .dtso`). All of these pass through the C preprocessor, so C comments are recognised exactly. Assembler comments in `.S` (`#`, `@`) are not; matches inside them stay listed, which errs toward showing rather than hiding code.
 - PD3. Raw string literals (`R"x(...)x"`) are lexed in every C-family file: GCC accepts them in `gnu*` C modes, which the kernel uses.
 - PD4. Result presentation mirrors the built-in Search view: an always-visible query form (webview view with case/word/regex toggles, include/exclude globs, history) above a native tree view of results (file icons, keyboard navigation, collapse). A quick-pick-only flow was rejected because the query is not visible while reading results.
 - PD5. Search backend: VS Code's bundled ripgrep plus an in-process lexical comment filter. Recorded in ADR-0003.

@@ -1,9 +1,12 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import { type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
+import { type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
+import { ScopeError, type ScopedFolder, resolveScope } from "../search/scope";
 import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
+import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
 import type { ResultsTree } from "./resultsTree";
 import * as settings from "./settings";
@@ -36,6 +39,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private abort: AbortController | undefined;
   private ripgrep: { configured: string; path: string } | undefined;
   private report: string[] = [];
+  private readonly contextValues: Record<string, unknown> = {};
   view: ViewChannel | undefined;
 
   constructor(
@@ -46,7 +50,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   ) {
     this.form = { ...EMPTY_FORM, ...state.get<Partial<QueryForm>>(FORM_KEY) };
     this.history = state.get<string[]>(HISTORY_KEY, []);
-    void this.setContext();
+    this.updateContext();
   }
 
   dispose(): void {
@@ -63,6 +67,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   hiddenLineReport(): readonly string[] {
     return this.report;
+  }
+
+  contextKeys(): Readonly<Record<string, unknown>> {
+    return this.contextValues;
   }
 
   viewState() {
@@ -126,6 +134,17 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       this.fail("Open a folder to search its code.");
       return undefined;
     }
+    let scoped: ScopedFolder[];
+    try {
+      const roots = folders.map((f) => ({ name: f.name, path: f.uri.fsPath }));
+      scoped = resolveScope(form.includes, form.excludes, roots, os.homedir());
+    } catch (e) {
+      if (e instanceof ScopeError) {
+        this.fail(e.message);
+        return undefined;
+      }
+      throw e;
+    }
 
     const rgPath = await this.findRipgrep();
     if (id !== this.runId) {
@@ -146,45 +165,42 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.abort = abort;
     const logHidden = settings.logExcludedLines();
     const hidden: HiddenLine[] = [];
+    // Nested workspace folders report the same file once per folder; count it once.
+    const seen = new Set<string>();
+    let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
-    const folderNames = new Set(names.values());
-    const includes = splitGlobList(form.includes);
-    const excludes = splitGlobList(form.excludes);
-    const targets: SearchTarget[] = [];
-    for (const folder of folders) {
-      const scoped = multiRoot ? scopeIncludes(includes, folder.name, folderNames) : includes;
-      if (scoped) {
-        targets.push({
-          folder: { path: folder.uri.fsPath, options: settings.folderOptions(folder.uri) },
-          query: {
-            pattern: form.pattern,
-            isRegExp: form.isRegExp,
-            isCaseSensitive: form.isCaseSensitive,
-            isWordMatch: form.isWordMatch,
-            includes: scoped,
-            excludes,
-          },
-        });
-      }
-    }
+    const targets: SearchTarget[] = scoped.map((scope) => ({
+      folder: { path: scope.path, options: settings.folderOptions(vscode.Uri.file(scope.path)) },
+      query: {
+        pattern: form.pattern,
+        isRegExp: form.isRegExp,
+        isCaseSensitive: form.isCaseSensitive,
+        isWordMatch: form.isWordMatch,
+        includes: scope.includes,
+        excludes: scope.excludes,
+      },
+    }));
 
     this.tree.reset(folders);
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
-    void vscode.commands.executeCommand("setContext", "codeonly.searching", true);
     const progress = setInterval(() => {
       if (id === this.runId) {
         this.setStatus({ kind: "searching", ...this.tree.counts() });
       }
     }, PROGRESS_INTERVAL_MS);
 
-    const onResult = (result: FileResult) => {
-      if (id !== this.runId) {
+    const onResult = (found: FileResult) => {
+      if (id !== this.runId || seen.has(found.absolutePath)) {
         return;
       }
+      const result = relativeToWorkspace(found, folders);
+      seen.add(result.absolutePath);
+      hiddenLineCount += result.excluded.length;
       this.tree.add(result);
       if (logHidden) {
-        const location = multiRoot ? `${names.get(result.folder)}/${result.relativePath}` : result.relativePath;
+        const folderName = names.get(result.folder) ?? path.basename(result.folder);
+        const location = multiRoot ? `${folderName}/${result.relativePath}` : result.relativePath;
         for (const e of result.excluded) {
           hidden.push({ location, lineNumber: e.lineNumber, reason: e.reason, text: e.text });
         }
@@ -200,13 +216,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         return undefined;
       }
       this.tree.refresh();
-      const counts = this.tree.counts();
       this.setStatus({
         kind: "done",
-        matchCount: summary.matchCount,
-        fileCount: summary.fileCount,
-        hiddenLineCount: summary.excludedLineCount,
-        unfilteredFileCount: counts.unfilteredFileCount,
+        ...this.tree.counts(),
+        hiddenLineCount,
         limitHit: summary.limitHit,
         maxResults,
         durationMs: summary.durationMs,
@@ -219,8 +232,9 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (id !== this.runId) {
         return undefined;
       }
-      this.ripgrep = undefined;
-      this.tree.reset([]);
+      if (!(e instanceof SearchError) || e.ripgrepFailed) {
+        this.ripgrep = undefined;
+      }
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof SearchError) {
         this.fail(message);
@@ -234,7 +248,6 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       clearInterval(progress);
       if (id === this.runId) {
         this.abort = undefined;
-        void vscode.commands.executeCommand("setContext", "codeonly.searching", false);
       }
     }
   }
@@ -255,33 +268,67 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   /** Called after the tree changed outside a search, e.g. a dismissed result. */
   resultsChanged(): void {
-    if (this.status.kind === "done") {
+    if (this.status.kind === "done" && this.tree.isEmpty) {
+      this.report = [];
+      this.setStatus({ kind: "idle" });
+    } else if (this.status.kind === "done") {
       this.setStatus({ ...this.status, ...this.tree.counts() });
     } else {
-      void this.setContext();
+      this.updateContext();
     }
   }
 
-  /** Reveals the query view with its input focused, seeded from the active editor. */
+  /**
+   * Reveals the query view with its input focused, seeded from the active editor. A new seed is
+   * searched right away when search-on-type is on; otherwise the old results are cleared so that
+   * they are not shown under the new term.
+   */
   async focusSearch(): Promise<void> {
     const seed = seedFromEditor(this.form.isRegExp);
-    if (seed !== undefined) {
+    const stale = this.status.kind === "idle" || this.status.kind === "error";
+    const changed = seed !== undefined && (seed !== this.form.pattern || stale);
+    if (changed) {
       this.setForm({ ...this.form, pattern: seed }, true);
     }
     await vscode.commands.executeCommand("codeonly.query.focus");
     this.view?.focusInput();
+    if (!changed) {
+      return;
+    }
+    if (settings.viewConfig().searchOnType) {
+      await this.search(this.form, false);
+    } else {
+      this.abort?.abort();
+      this.runId++;
+      this.report = [];
+      this.tree.reset([]);
+      this.setStatus({ kind: "idle" });
+    }
   }
 
-  async findInFolder(uri: vscode.Uri): Promise<void> {
-    const folder = vscode.workspace.getWorkspaceFolder(uri);
-    if (!folder) {
+  /** Scopes the query to `uris` (Explorer selection), each relative to its workspace folder. */
+  async findInFolder(uris: readonly vscode.Uri[]): Promise<void> {
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const scopes: string[] = [];
+    for (const uri of uris) {
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      if (!folder) {
+        continue;
+      }
+      const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
+      const parts = [multiRoot ? folder.name : undefined, rel || undefined].filter((p): p is string => !!p);
+      if (parts.length === 0) {
+        // The folder root itself: no restriction.
+        scopes.length = 0;
+        break;
+      }
+      scopes.push(`./${escapeGlob(parts.join("/"))}`);
+    }
+    if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
       return;
     }
-    const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
-    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
-    const scope = [multiRoot ? folder.name : undefined, rel || undefined].filter(Boolean).join("/");
-    this.setForm({ ...this.form, includes: scope ? `./${scope}` : "", showDetails: true }, true);
+    this.setForm({ ...this.form, includes: scopes.join(", "), showDetails: true }, true);
     await vscode.commands.executeCommand("codeonly.query.focus");
     this.view?.focusInput();
     if (this.form.pattern) {
@@ -314,10 +361,12 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.status = status;
     this.view?.post({ type: "status", status });
     this.updateTreeView();
-    void this.setContext();
+    this.updateContext();
   }
 
+  /** An error replaces the results: whatever is listed no longer matches the query. */
   private fail(message: string, action?: StatusCommand): void {
+    this.tree.reset([]);
     this.setStatus({ kind: "error", message, action });
   }
 
@@ -348,9 +397,19 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
   }
 
-  private async setContext(): Promise<void> {
-    await vscode.commands.executeCommand("setContext", "codeonly.hasResults", !this.tree.isEmpty);
-    await vscode.commands.executeCommand("setContext", "codeonly.state", this.status.kind);
+  /** Context keys are derived from the status and the tree only, so no code path can leave them stale. */
+  private updateContext(): void {
+    const values: Record<string, unknown> = {
+      "codeonly.state": this.status.kind,
+      "codeonly.searching": this.status.kind === "searching",
+      "codeonly.hasResults": !this.tree.isEmpty,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (this.contextValues[key] !== value) {
+        this.contextValues[key] = value;
+        void vscode.commands.executeCommand("setContext", key, value);
+      }
+    }
   }
 
   private async findRipgrep(): Promise<string | undefined> {
@@ -382,7 +441,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       return;
     }
     hidden.sort((a, b) => a.location.localeCompare(b.location) || a.lineNumber - b.lineNumber);
-    this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${h.text.trim()}`);
+    this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${makePreview(h.text, []).label}`);
     this.log.info(`Hidden lines for "${form.pattern}" (${hidden.length}):`);
     for (const line of this.report) {
       this.log.info(`  ${line}`);
@@ -463,6 +522,22 @@ function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
     durationMs: a.durationMs + b.durationMs,
     warnings: [...a.warnings, ...b.warnings],
   };
+}
+
+/** A search root below a workspace folder still names files relative to that folder. */
+function relativeToWorkspace(result: FileResult, folders: readonly vscode.WorkspaceFolder[]): FileResult {
+  if (folders.some((f) => f.uri.fsPath === result.folder)) {
+    return result;
+  }
+  const owner = folders.find((f) => {
+    const rel = path.relative(f.uri.fsPath, result.absolutePath);
+    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+  if (!owner) {
+    return result;
+  }
+  const relativePath = path.relative(owner.uri.fsPath, result.absolutePath).split(path.sep).join("/");
+  return { ...result, folder: owner.uri.fsPath, relativePath };
 }
 
 function seedFromEditor(isRegExp: boolean): string | undefined {

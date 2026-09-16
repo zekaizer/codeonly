@@ -3,8 +3,8 @@ import type { ResultsTree } from "./resultsTree";
 
 /**
  * Highlights the shown matches in visible editors while the results view is visible, like the
- * Search view does. A document edited after the search loses its highlights until the next search,
- * since the recorded columns no longer apply.
+ * Search view does. The search reads files on disk, so a document with unsaved changes at search
+ * time, or edited after it, gets no highlights until the next search.
  */
 export class MatchHighlights implements vscode.Disposable {
   private readonly decoration = vscode.window.createTextEditorDecorationType({
@@ -23,7 +23,7 @@ export class MatchHighlights implements vscode.Disposable {
   ) {
     this.subscriptions = [
       this.decoration,
-      tree.onDidReset(() => this.stale.clear()),
+      tree.onDidReset(() => this.markUnsavedStale()),
       tree.onDidChangeTreeData(() => this.update()),
       vscode.window.onDidChangeVisibleTextEditors(() => this.update()),
       vscode.workspace.onDidChangeTextDocument((e) => {
@@ -37,6 +37,15 @@ export class MatchHighlights implements vscode.Disposable {
 
   dispose(): void {
     vscode.Disposable.from(...this.subscriptions).dispose();
+  }
+
+  private markUnsavedStale(): void {
+    this.stale.clear();
+    for (const doc of vscode.workspace.textDocuments) {
+      if (doc.isDirty) {
+        this.stale.add(doc.uri.toString());
+      }
+    }
   }
 
   rangesFor(uri: vscode.Uri): readonly vscode.Range[] {

@@ -31,6 +31,12 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: [media, scripts] };
     view.webview.html = this.html(view.webview, media, scripts);
     view.webview.onDidReceiveMessage((message: FromWebview) => this.receive(message));
+    // A hidden view's page is discarded; it announces itself again when shown.
+    view.onDidChangeVisibility(() => {
+      if (!view.visible && this.view === view) {
+        this.ready = false;
+      }
+    });
     view.onDidDispose(() => {
       if (this.view === view) {
         this.view = undefined;

@@ -1,11 +1,13 @@
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { REASON_COMMENT_ONLY } from "../classify/lineDecision";
 import { type FileResult, type SearchRequest, SearchError, type SearchSummary, searchCode } from "../search/codeSearch";
 import type { FolderOptions, SearchQuery } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
+import { resolveScope } from "../search/scope";
 
 const FIXTURE = path.resolve(__dirname, "../../test-fixtures/workspace");
 
@@ -16,6 +18,7 @@ const options: FolderOptions = {
   useGlobalIgnoreFiles: false,
   followSymlinks: true,
   smartCase: false,
+  ignoreGlobCase: false,
 };
 
 interface Outcome {
@@ -27,14 +30,23 @@ let rgPath: string;
 
 async function search(
   pattern: string,
-  overrides: Partial<SearchQuery> = {},
+  overrides: Partial<Omit<SearchQuery, "includes" | "excludes">> & { includes?: string; excludes?: string } = {},
   extra: Partial<Pick<SearchRequest, "maxResults" | "signal">> = {},
 ): Promise<Outcome> {
   const results = new Map<string, FileResult>();
+  const [scoped] = resolveScope(overrides.includes ?? "", overrides.excludes ?? "", [{ name: "workspace", path: FIXTURE }], os.homedir());
   const summary = await searchCode({
     rgPath,
-    query: { pattern, isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [], ...overrides },
-    folders: [{ path: FIXTURE, options }],
+    query: {
+      pattern,
+      isRegExp: false,
+      isCaseSensitive: true,
+      isWordMatch: false,
+      ...overrides,
+      includes: scoped.includes,
+      excludes: scoped.excludes,
+    },
+    folders: [{ path: scoped.path, options }],
     onResult: (r) => {
       assert.ok(!results.has(r.relativePath), `duplicate result for ${r.relativePath}`);
       results.set(r.relativePath, r);
@@ -160,8 +172,16 @@ suite("code search pipeline", () => {
   });
 
   test("include and exclude globs", async () => {
-    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./src"] })), ["src/main.c"]);
-    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: ["*.txt", "Makefile"] })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./src" })), ["src/main.c"]);
+    // Same file set as the built-in Search view: a folder-relative include prunes other folders.
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./src, *.txt" })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./docs, Makefile" })), [
+      "Makefile",
+      "docs/notes.txt",
+    ]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ".txt" })), ["docs/notes.txt"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: "*.txt, Makefile" })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: "./src" })), ["Makefile", "docs/notes.txt"]);
   });
 
   test("case-insensitive and whole-word search", async () => {
@@ -188,11 +208,162 @@ suite("code search pipeline", () => {
     assert.equal(escaped.summary.matchCount, 0);
   });
 
+  test("query errors and ripgrep failures are told apart", async () => {
+    await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => e instanceof SearchError && !e.ripgrepFailed);
+    await assert.rejects(
+      searchCode({
+        rgPath: "/nonexistent/rg",
+        query: { pattern: "x", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+        folders: [{ path: FIXTURE, options }],
+        onResult: () => undefined,
+      }),
+      (e: unknown) => e instanceof SearchError && e.ripgrepFailed === true && /ripgrep/.test(e.message),
+    );
+  });
+
   test("an aborted search reports cancellation", async () => {
     const controller = new AbortController();
     controller.abort();
     const o = await search("widget_init", {}, { signal: controller.signal });
     assert.equal(o.summary.cancelled, true);
     assert.equal(o.results.size, 0);
+  });
+});
+
+suite("code search pipeline edge cases", () => {
+  const dirs: string[] = [];
+
+  function workspace(files: Record<string, string>): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codeonly-ws-"));
+    dirs.push(dir);
+    for (const [name, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      fs.writeFileSync(path.join(dir, name), content);
+    }
+    return dir;
+  }
+
+  async function run(
+    dir: string,
+    pattern: string,
+    overrides: Partial<SearchQuery> = {},
+    onResult?: (r: FileResult) => void,
+  ): Promise<Outcome> {
+    const results = new Map<string, FileResult>();
+    const summary = await searchCode({
+      rgPath,
+      query: { pattern, isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [], ...overrides },
+      folders: [{ path: dir, options }],
+      onResult: (r) => {
+        results.set(r.relativePath, r);
+        onResult?.(r);
+      },
+    });
+    return { results, summary };
+  }
+
+  suiteSetup(async () => {
+    const found = await locateRipgrep(vscode.env.appRoot);
+    assert.ok(found);
+    rgPath = found;
+  });
+
+  suiteTeardown(() => {
+    for (const dir of dirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a line containing U+2028 is still reported", async () => {
+    const dir = workspace({ "a.c": "int a;  int widget_sep;\n", "b.txt": "x  widget_sep\n" });
+    const o = await run(dir, "widget_sep");
+    assert.deepEqual(shown(o, "a.c"), [1]);
+    assert.deepEqual(shown(o, "b.txt"), [1]);
+  });
+
+  test("an unreadable path with no matches is a warning, not an error", async () => {
+    const dir = workspace({ "a.c": "int x;\n" });
+    fs.symlinkSync("/nonexistent-codeonly-target", path.join(dir, "dangling"));
+    const o = await run(dir, "zzz_no_match");
+    assert.equal(o.summary.matchCount, 0);
+    assert.equal(o.summary.warnings.length, 1);
+    assert.match(o.summary.warnings[0], /dangling/);
+  });
+
+  test("a ripgrep that cannot start does not leave an unhandled rejection", async () => {
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await assert.rejects(
+        searchCode({
+          rgPath: "/nonexistent/rg",
+          query: { pattern: "x", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+          folders: [{ path: FIXTURE, options }],
+          onResult: () => undefined,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(seen, []);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("an error while handling a result fails the search", async () => {
+    const dir = workspace(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}.c`, "int widget_many;\n"])));
+    let calls = 0;
+    await assert.rejects(
+      run(dir, "widget_many", {}, () => {
+        calls++;
+        throw new Error("boom");
+      }),
+      (e: unknown) => e instanceof SearchError && /boom/.test(e.message),
+    );
+    const settled = calls;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(calls, settled, "results kept arriving after the search failed");
+  });
+
+  test("newline escapes are rejected only where they would have to match a newline", async () => {
+    const dir = workspace({ "a.c": "int widget_nl;\n" });
+    assert.deepEqual(shown(await run(dir, "int [^\\n]*widget_nl", { isRegExp: true }), "a.c"), [1]);
+    for (const pattern of ["widget_nl\\x0a", "widget_nl\\x{A}", "widget_nl\\u000a", "widget_nl\\n"]) {
+      await assert.rejects(run(dir, pattern, { isRegExp: true }), /Multi-line/, pattern);
+    }
+  });
+
+  test("empty matches are classified at their position, including line ends", async () => {
+    const dir = workspace({ "e.c": "int x;\n// only comment\nint y;\n// last", "e.txt": "a\nb" });
+    const start = await run(dir, "^", { isRegExp: true });
+    assert.deepEqual(shown(start, "e.c"), [1, 3]);
+    assert.deepEqual(
+      hidden(start, "e.c").map(([line]) => line),
+      [2, 4],
+    );
+    const end = await run(dir, "$", { isRegExp: true });
+    assert.deepEqual(shown(end, "e.c"), [1, 3]);
+    assert.deepEqual(
+      hidden(end, "e.c").map(([line]) => line),
+      [2, 4],
+    );
+    assert.deepEqual(shown(end, "e.txt"), [1, 2]);
+    assert.equal(end.summary.matchCount, 4);
+  });
+
+  test("a file name that is not UTF-8 is still read", async function () {
+    if (process.platform !== "linux") {
+      this.skip();
+    }
+    const dir = workspace({});
+    fs.writeFileSync(Buffer.concat([Buffer.from(`${dir}/caf`), Buffer.from([0xe9]), Buffer.from(".c")]), "int widget_nm; // widget_nm\n");
+    const o = await run(dir, "widget_nm");
+    const [result] = o.results.values();
+    assert.ok(result);
+    assert.deepEqual(
+      result.lines.map((l) => l.lineNumber),
+      [1],
+    );
+    assert.equal(result.lines[0].ranges.length, 1);
   });
 });

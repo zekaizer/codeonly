@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as readline from "node:readline";
+import type { Readable } from "node:stream";
 import type { FolderOptions, SearchQuery } from "./query";
 
 /**
@@ -12,14 +12,26 @@ import type { FolderOptions, SearchQuery } from "./query";
 export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): string[] {
   const args = ["--hidden", "--no-require-git"];
   args.push(isCaseSensitive(query, options.smartCase) ? "--case-sensitive" : "--ignore-case");
-  for (const glob of unique(query.includes.flatMap(expandSearchGlob))) {
+  if (options.ignoreGlobCase) {
+    args.push("--glob-case-insensitive", "--ignore-file-case-insensitive");
+  }
+  const includes = unique([...query.includes]);
+  const rooted = includes.filter((g) => !g.startsWith("**"));
+  if (rooted.length > 0) {
+    // Exclude everything, then re-include each folder on the way down, as VS Code does.
+    args.push("-g", "!*");
+    for (const glob of unique(rooted.flatMap(expandBraces).flatMap(pathPrefixes))) {
+      args.push("-g", anchorGlob(glob));
+    }
+  }
+  for (const glob of includes.filter((g) => g.startsWith("**"))) {
     args.push("-g", glob);
   }
-  for (const glob of options.excludes.map(anchorSettingGlob)) {
-    args.push("-g", `!${glob}`);
+  for (const glob of options.excludes) {
+    args.push("-g", `!${anchorGlob(trimTrailingSlashes(glob.replace(/\\/g, "/")))}`);
   }
-  for (const glob of unique(query.excludes.flatMap(expandSearchGlob))) {
-    args.push("-g", `!${glob}`);
+  for (const glob of unique([...query.excludes])) {
+    args.push("-g", `!${anchorGlob(glob)}`);
   }
   if (!options.useIgnoreFiles) {
     args.push("--no-ignore");
@@ -77,23 +89,67 @@ function wholeWordRegExp(pattern: string, isRegExp: boolean): string {
   return source;
 }
 
-/** Setting keys are folder-relative globs; ripgrep needs a leading `/` to anchor them. */
-function anchorSettingGlob(glob: string): string {
-  const g = trimTrailingSlashes(glob.replace(/\\/g, "/"));
-  return g.startsWith("**") || g.startsWith("/") ? g : `/${g}`;
+/** Folder-relative globs need a leading `/` to be anchored by ripgrep. */
+function anchorGlob(glob: string): string {
+  return glob.startsWith("**") || glob.startsWith("/") ? glob : `/${glob}`;
 }
 
-/** `./dir` is folder-relative; anything else matches at any depth, as in the Search view. */
-function expandSearchGlob(input: string): string[] {
-  const glob = trimTrailingSlashes(input.replace(/\\/g, "/"));
-  if (glob.startsWith("./") || glob === ".") {
-    const rel = glob.slice(2).replace(/^\/+/, "");
-    return rel ? [`/${rel}`, `/${rel}/**`] : [];
+/** `a/b/c` → `a`, `a/b`, `a/b/c`, splitting only outside `{}` and `[]`. */
+function pathPrefixes(glob: string): string[] {
+  const parts = splitOutsideGroups(glob, "/");
+  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+}
+
+/** Expands `{a,b}` groups, as VS Code does before listing include prefixes. */
+function expandBraces(glob: string): string[] {
+  const open = glob.indexOf("{");
+  if (open < 0) {
+    return [glob];
   }
-  if (glob.startsWith("/")) {
-    return [glob, `${glob}/**`];
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < glob.length && close < 0; i++) {
+    if (glob[i] === "{") {
+      depth++;
+    } else if (glob[i] === "}" && --depth === 0) {
+      close = i;
+    }
   }
-  return [`**/${glob}`, `**/${glob}/**`].map((g) => g.replace(/\*\*\/\*\*/g, "**"));
+  if (close < 0) {
+    return [glob];
+  }
+  const head = glob.slice(0, open);
+  const alternatives = splitOutsideGroups(glob.slice(open + 1, close), ",");
+  const tails = expandBraces(glob.slice(close + 1));
+  return (alternatives.length > 0 ? alternatives : [""]).flatMap((a) => tails.map((t) => head + a + t));
+}
+
+function splitOutsideGroups(text: string, separator: string): string[] {
+  const out: string[] = [];
+  let braces = 0;
+  let brackets = false;
+  let current = "";
+  for (const ch of text) {
+    if (ch === separator && braces === 0 && !brackets) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    if (ch === "{") {
+      braces++;
+    } else if (ch === "}" && braces > 0) {
+      braces--;
+    } else if (ch === "[") {
+      brackets = true;
+    } else if (ch === "]") {
+      brackets = false;
+    }
+    current += ch;
+  }
+  if (current) {
+    out.push(current);
+  }
+  return out;
 }
 
 function trimTrailingSlashes(glob: string): string {
@@ -164,8 +220,10 @@ export interface RipgrepLine {
 }
 
 export interface RipgrepFile {
-  /** Path as printed by ripgrep, relative to the working directory. */
+  /** Path as printed by ripgrep, relative to the working directory. Lossy if the name is not UTF-8. */
   readonly path: string;
+  /** Exact path bytes, present only when the name is not valid UTF-8. */
+  readonly rawPath?: Buffer;
   readonly lines: RipgrepLine[];
 }
 
@@ -190,17 +248,28 @@ interface RgMessage {
 
 const STDERR_LIMIT = 64 * 1024;
 
-/** Reduces ripgrep's stderr to one user-facing sentence. */
-export function summarizeRipgrepError(stderr: string): string {
+/**
+ * Returns a one-sentence message if ripgrep's stderr reports a problem with the query itself
+ * (pattern or glob), as VS Code distinguishes them; undefined for other errors, such as
+ * unreadable files, which do not invalidate the search.
+ */
+export function queryErrorMessage(stderr: string): string | undefined {
   if (/regex parse error/.test(stderr)) {
     const reason = /^error: (.+)$/m.exec(stderr)?.[1];
     return reason ? `Invalid regular expression: ${reason}` : "Invalid regular expression.";
   }
+  const pcre = /PCRE2: error compiling pattern.*$/m.exec(stderr)?.[0];
+  if (pcre) {
+    return `Invalid regular expression: ${pcre}`;
+  }
   if (/the literal "\\n" is not allowed/.test(stderr)) {
     return "Multi-line patterns are not supported.";
   }
-  const first = stderr.split("\n").find((l) => l.trim()) ?? "";
-  return first.replace(/^rg: /, "").trim() || "ripgrep failed.";
+  const glob = /error parsing glob.*$/m.exec(stderr)?.[0];
+  if (glob) {
+    return `Invalid file pattern: ${glob.replace(/^error parsing glob /, "")}`;
+  }
+  return undefined;
 }
 
 /**
@@ -219,6 +288,8 @@ export async function runRipgrep(
     child.once("error", reject);
     child.once("close", (code) => resolve(code));
   });
+  // A spawn failure rejects before `exited` is awaited below.
+  exited.catch(() => undefined);
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
@@ -229,14 +300,13 @@ export async function runRipgrep(
   const kill = () => child.kill();
   signal?.addEventListener("abort", kill);
   try {
-    const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     let current: RipgrepFile | undefined;
-    for await (const line of lines) {
+    for await (const line of splitLines(child.stdout)) {
       const message = parseMessage(line);
       if (message?.type === "begin") {
-        current = { path: decodeData(message.data.path), lines: [] };
+        current = { ...decodePath(message.data.path), lines: [] };
       } else if (message?.type === "match") {
-        current ??= { path: decodeData(message.data.path), lines: [] };
+        current ??= { ...decodePath(message.data.path), lines: [] };
         current.lines.push(toLine(message));
       } else if (message?.type === "end") {
         if (current && current.lines.length > 0 && !signal?.aborted) {
@@ -255,6 +325,29 @@ export async function runRipgrep(
   }
 }
 
+/**
+ * Splits output on `\n` only. readline also splits on U+2028 and U+2029, which ripgrep's JSON
+ * leaves unescaped inside strings.
+ */
+async function* splitLines(stream: Readable): AsyncGenerator<string> {
+  const parts: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer>) {
+    let start = 0;
+    for (let nl = chunk.indexOf(0x0a); nl >= 0; nl = chunk.indexOf(0x0a, start)) {
+      parts.push(chunk.subarray(start, nl));
+      yield (parts.length === 1 ? parts[0] : Buffer.concat(parts)).toString("utf8");
+      parts.length = 0;
+      start = nl + 1;
+    }
+    if (start < chunk.length) {
+      parts.push(chunk.subarray(start));
+    }
+  }
+  if (parts.length > 0) {
+    yield Buffer.concat(parts).toString("utf8");
+  }
+}
+
 function parseMessage(line: string): RgMessage | undefined {
   if (!line) {
     return undefined;
@@ -266,11 +359,15 @@ function parseMessage(line: string): RgMessage | undefined {
   }
 }
 
-function decodeData(data: RgData | undefined): string {
+function decodePath(data: RgData | undefined): Pick<RipgrepFile, "path" | "rawPath"> {
   if (!data) {
-    return "";
+    return { path: "" };
   }
-  return "text" in data ? data.text : Buffer.from(data.bytes, "base64").toString("utf8");
+  if ("text" in data) {
+    return { path: data.text };
+  }
+  const rawPath = Buffer.from(data.bytes, "base64");
+  return { path: rawPath.toString("utf8"), rawPath };
 }
 
 function toLine(message: RgMessage): RipgrepLine {

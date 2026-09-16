@@ -17,6 +17,16 @@ function fileEntry(tree: readonly ResultEntry[], rel: string): ResultEntry {
   return entry;
 }
 
+async function waitFor(condition: () => boolean, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error("condition not met in time");
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -109,6 +119,21 @@ suite("search UI", () => {
     }
   });
 
+  test("focus command runs the search for a newly seeded term", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(doc);
+    editor.selection = new vscode.Selection(4, 12, 4, 12);
+    await vscode.commands.executeCommand("codeonly.focusSearch");
+    assert.equal(api.form().pattern, "widget_count");
+    const status = api.status();
+    assert.equal(status.kind, "done");
+    assert.deepEqual(
+      fileEntry(await api.resultTree(), "src/main.c").children.map((c) => labelOf(c.item)),
+      ["return widget_count; /* widget_count */", "int total = widget_count + 1;"],
+    );
+  });
+
   test("focus command seeds the query from the selection, else the word at the cursor", async () => {
     const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
     const editor = await vscode.window.showTextDocument(doc);
@@ -133,6 +158,14 @@ suite("search UI", () => {
     assert.equal(api.form().showDetails, true);
     const summary = await api.search({ pattern: "widget_init" });
     assert.equal(summary?.fileCount, 1);
+    await api.search({ includes: "" });
+  });
+
+  test("an absolute path in include searches that path and keeps workspace-relative names", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: path.join(FIXTURE, "src") });
+    assert.equal(summary?.fileCount, 1);
+    const main = fileEntry(await api.resultTree(), "src/main.c");
+    assert.match(String(main.item.description), /^src\b/);
     await api.search({ includes: "" });
   });
 
@@ -166,6 +199,49 @@ suite("search UI", () => {
     await vscode.commands.executeCommand("workbench.action.files.revert");
   });
 
+  test("an unsaved document gets no highlights, since the search read the file on disk", async () => {
+    await vscode.commands.executeCommand("codeonly.results.focus");
+    const uri = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(uri);
+    await editor.edit((b) => b.insert(new vscode.Position(0, 0), "\n"));
+    try {
+      await api.search({ ...base, pattern: "widget_count" });
+      assert.deepEqual(api.highlightedRanges(uri), []);
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.files.revert");
+    }
+  });
+
+  test("dismissing every result returns to the idle state", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    for (const entry of await api.resultTree()) {
+      await vscode.commands.executeCommand("codeonly.dismiss", entry.node);
+    }
+    assert.deepEqual(await api.resultTree(), []);
+    assert.equal(api.status().kind, "idle");
+    assert.equal(api.form().pattern, "widget_count");
+  });
+
+  test("status counts follow dismissals", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.dismiss", fileEntry(await api.resultTree(), "Makefile").node);
+    const status = api.status();
+    assert.equal(status.kind, "done");
+    if (status.kind === "done") {
+      assert.equal(status.matchCount, 3);
+      assert.equal(status.fileCount, 2);
+      assert.equal(status.unfilteredFileCount, 1);
+    }
+  });
+
+  test("find in folder takes every selected folder", async () => {
+    const src = vscode.Uri.file(path.join(FIXTURE, "src"));
+    const docs = vscode.Uri.file(path.join(FIXTURE, "docs"));
+    await vscode.commands.executeCommand("codeonly.findInFolder", src, [src, docs]);
+    assert.equal(api.form().includes, "./src, ./docs");
+    await api.search({ includes: "" });
+  });
+
   test("highlights follow dismissals and clear with the results", async () => {
     await vscode.commands.executeCommand("codeonly.results.focus");
     await api.search({ ...base, pattern: "widget_count" });
@@ -191,6 +267,38 @@ suite("search UI", () => {
       assert.equal(status.message, "Invalid regular expression: unclosed group");
     }
     await api.search({ isRegExp: false });
+  });
+
+  test("superseding a running search leaves no stale searching state", async () => {
+    for (const stop of [
+      () => vscode.commands.executeCommand("codeonly.clear"),
+      () => api.search({ pattern: "" }),
+    ]) {
+      const pending = api.search({ ...base, pattern: "widget" });
+      await waitFor(() => api.status().kind === "searching");
+      await stop();
+      await pending;
+      assert.equal(api.contextKeys()["codeonly.searching"], false);
+      assert.equal(api.contextKeys()["codeonly.state"], "idle");
+    }
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.equal(api.contextKeys()["codeonly.searching"], false);
+    assert.equal(api.contextKeys()["codeonly.hasResults"], true);
+  });
+
+  test("a search that cannot start clears the previous results", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.notDeepEqual(await api.resultTree(), []);
+    const config = vscode.workspace.getConfiguration("codeonly");
+    await config.update("ripgrepPath", "/nonexistent/rg", vscode.ConfigurationTarget.Global);
+    try {
+      assert.equal(await api.search({ ...base, pattern: "widget_init" }), undefined);
+      assert.equal(api.status().kind, "error");
+      assert.deepEqual(await api.resultTree(), []);
+      assert.equal(api.contextKeys()["codeonly.hasResults"], false);
+    } finally {
+      await config.update("ripgrepPath", undefined, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test("an empty pattern clears the results", async () => {

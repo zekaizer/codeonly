@@ -46,6 +46,12 @@ let history: string[] = [];
 let historyIndex = -1;
 let draft = "";
 let debounce: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Inputs typed into before the extension's state arrived. Over a remote connection that state can
+ * arrive after the user started typing, and must not overwrite what they typed.
+ */
+const editedBeforeInit = new Set<HTMLInputElement>();
+let initialized = false;
 
 render(((vscode.getState() as { form?: QueryForm } | undefined)?.form) ?? EMPTY_FORM);
 
@@ -128,18 +134,21 @@ function toggle(button: HTMLButtonElement): void {
   }
 }
 
+/** Moves through history, skipping entries equal to the shown text; searches only if the text changed. */
 function browseHistory(direction: -1 | 1): void {
-  if (history.length === 0) {
-    return;
-  }
-  if (historyIndex === -1) {
+  const before = pattern.value;
+  let index = historyIndex;
+  if (index === -1) {
     if (direction === 1) {
       return;
     }
-    draft = pattern.value;
-    historyIndex = history.length;
+    draft = before;
+    index = history.length;
   }
-  const next = historyIndex + direction;
+  let next = index + direction;
+  while (next >= 0 && next < history.length && history[next] === before) {
+    next += direction;
+  }
   if (next < 0) {
     return;
   }
@@ -151,7 +160,9 @@ function browseHistory(direction: -1 | 1): void {
     pattern.value = history[next];
   }
   pattern.setSelectionRange(pattern.value.length, pattern.value.length);
-  edited();
+  if (pattern.value !== before) {
+    edited();
+  }
 }
 
 function focusPattern(): void {
@@ -161,23 +172,32 @@ function focusPattern(): void {
 
 for (const input of [pattern, includes, excludes]) {
   input.addEventListener("input", () => {
+    if (!initialized) {
+      editedBeforeInit.add(input);
+    }
     if (input === pattern) {
       historyIndex = -1;
     }
     edited();
   });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.isComposing) {
+    if (e.isComposing || e.keyCode === 229) {
+      return;
+    }
+    if (e.key === "Enter") {
       e.preventDefault();
       searchNow(true);
     } else if (e.key === "Escape") {
       post({ type: "cancel" });
+    } else if (e.key === "ArrowDown" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      post({ type: "command", command: "focusResults" });
     }
   });
 }
 
 pattern.addEventListener("keydown", (e) => {
-  if (e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+  if (e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
     return;
   }
   if (e.key === "ArrowUp") {
@@ -208,7 +228,7 @@ formEl.addEventListener("submit", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) {
     return;
   }
   const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;
@@ -243,12 +263,25 @@ window.addEventListener("focus", () => {
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   const message = event.data;
   switch (message.type) {
-    case "init":
+    case "init": {
       config = message.config;
       history = [...message.history];
-      render(message.form);
+      const typed = (input: HTMLInputElement, value: string) => (editedBeforeInit.has(input) ? input.value : value);
+      render({
+        ...message.form,
+        pattern: typed(pattern, message.form.pattern),
+        includes: typed(includes, message.form.includes),
+        excludes: typed(excludes, message.form.excludes),
+      });
       renderStatus(message.status);
+      initialized = true;
+      document.body.dataset.ready = "true";
+      if (editedBeforeInit.size > 0) {
+        editedBeforeInit.clear();
+        edited();
+      }
       break;
+    }
     case "form":
       render(message.form);
       if (message.focus) {
@@ -299,6 +332,8 @@ function line(): HTMLDivElement {
 }
 
 function renderStatus(status: SearchStatus): void {
+  // Screen readers hold announcements while busy, so progress updates are not read out one by one.
+  statusEl.setAttribute("aria-busy", String(status.kind === "searching"));
   statusEl.replaceChildren();
   statusEl.classList.toggle("error", status.kind === "error");
   patternField.classList.toggle("error", status.kind === "error");

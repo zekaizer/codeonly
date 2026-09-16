@@ -249,24 +249,6 @@
         "command": "codeonly.focusSearch",
         "key": "ctrl+shift+alt+f",
         "mac": "cmd+shift+alt+f"
-      },
-      {
-        "command": "codeonly.openToSide",
-        "key": "ctrl+enter",
-        "mac": "cmd+enter",
-        "when": "focusedView == codeonly.results"
-      },
-      {
-        "command": "codeonly.dismiss",
-        "key": "delete",
-        "mac": "cmd+backspace",
-        "when": "focusedView == codeonly.results"
-      },
-      {
-        "command": "codeonly.copy",
-        "key": "ctrl+c",
-        "mac": "cmd+c",
-        "when": "focusedView == codeonly.results"
       }
     ],
     "configuration": {

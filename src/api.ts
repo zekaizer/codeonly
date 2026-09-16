@@ -20,6 +20,8 @@ export interface CodeOnlyApi {
   hiddenLineReport(): readonly string[];
   /** Match highlights currently applied to visible editors showing `uri`. */
   highlightedRanges(uri: vscode.Uri): readonly vscode.Range[];
+  /** Context key values last set by the extension. */
+  contextKeys(): Readonly<Record<string, unknown>>;
   /** Resolves once the query view's script has started. */
   queryViewReady(): Promise<void>;
 }

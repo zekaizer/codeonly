@@ -1,97 +1,100 @@
 # CodeOnly Search
 
-Workspace search for VS Code that hides result lines whose matches are only
-inside comments. Built for C codebases such as the Linux kernel, where a
-symbol search otherwise returns doc comments and commented-out code mixed in
-with real usages.
+Search your workspace and see only the lines where a symbol is used in code.
+Lines whose matches are all inside comments are hidden, so doc comments and
+remarks no longer bury the real usages. Made for C codebases such as the
+Linux kernel.
 
-- `foo(); /* foo */` is kept, and only the code match is highlighted.
+- `foo(); /* foo */` is shown, and only the code match is highlighted.
 - `/* foo is set up here */` and `// see foo` are hidden.
-- Code inside `#if 0` / disabled `#ifdef` blocks is still found: the
-  preprocessor is not evaluated.
-- When a line cannot be classified (for example after an unterminated `/*`),
-  it is hidden rather than shown.
+- Code inside `#if 0` or a disabled `#ifdef` block is still found.
+- A line that cannot be classified with confidence, such as text after an
+  unterminated `/*`, is hidden.
 
-## Install
+## Installation
 
-```sh
-npm install
-npm run vsix          # builds codeonly-<version>.vsix
-```
+1. Get the `codeonly-<version>.vsix` file.
+2. In VS Code, open the Command Palette and run
+   **Extensions: Install from VSIX...**, then pick the file.
+   From a terminal: `code --install-extension codeonly-<version>.vsix`.
 
-In VS Code, run **Extensions: Install from VSIX...** and pick the file. In a
-Remote-SSH, WSL, or Dev Container window the extension installs on the remote
-side, where the files are.
+When you work over Remote-SSH, WSL, or in a Dev Container, install it from a
+window connected to that remote so that it runs next to your files.
 
-## Use
+## Searching
 
-Open the **CodeOnly Search** view in the activity bar, or press
-`Ctrl+Shift+Alt+F` (`Cmd+Shift+Alt+F` on macOS). The search input is seeded
-with the editor selection, or with the word at the cursor.
+Open **CodeOnly Search** from the activity bar, or press
+`Ctrl+Shift+Alt+F` (`Cmd+Shift+Alt+F` on macOS). The search box is filled
+with the editor selection, or with the word under the cursor.
 
-| In the search input | |
+Results appear as you type, grouped by file. The line under the search box
+tells you how many results were found and how many comment-only lines were
+hidden.
+
+| In the search box | |
 |---|---|
-| `Enter` | Search now and add the term to history |
-| `Up` / `Down` | Browse search history |
-| `Alt+C` / `Alt+W` / `Alt+R` | Match case / whole word / regular expression |
-| `Esc` | Stop a running search |
-| `···` | Show *include* / *exclude* globs (same syntax as the Search view) |
+| `Enter` | Search now and remember the term |
+| `Up` / `Down` | Previous / next remembered term |
+| `Alt+C` / `Alt+W` / `Alt+R` | Match Case / Match Whole Word / Use Regular Expression |
+| `Ctrl+Down` | Move to the results |
+| `Esc` | Stop the search |
+| `···` button | Show the *include* and *exclude* boxes |
 
-| In the results | |
-|---|---|
-| Click / `Enter` | Open the file with the match selected |
-| `Ctrl+Enter` | Open to the side |
-| `Delete` | Dismiss the result |
-| `Ctrl+C` | Copy the line (or the path, on a file) |
+The *include* and *exclude* boxes take the same patterns as VS Code's Search
+view, for example `*.c, ./drivers/gpu` or `**/tests/**`. You can also
+right-click one or more folders in the Explorer and choose
+**Find Code in Folder (Exclude Comments)...**.
 
-The status line shows how many comment-only lines were hidden; click it to
-see them. **Find Code in Folder (Exclude Comments)...** in the Explorer
-context menu scopes the search to a folder. **CodeOnly: Go to Next/Previous
-Result** have no default keys; bind them in Keyboard Shortcuts if you want.
+In the results, click a line or press `Enter` to open the file with the match
+selected. Hover a result and click **×** to dismiss it. Right-click a result
+for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
-## What is filtered
+While results are shown, the matches are also highlighted in open editors.
+**CodeOnly: Go to Next Result** and **CodeOnly: Go to Previous Result** are in
+the Command Palette; you can bind keys to them in Keyboard Shortcuts.
 
-Comment filtering applies to files that use C comment syntax:
+## Which files are filtered
+
+Comments are recognised in files that use C comment syntax:
 `.c .h .cc .cpp .cxx .hh .hpp .hxx .inl .S .dts .dtsi .dtso`.
-Other files (Makefile, Kconfig, ...) are listed as-is and marked
-*unfiltered*, so usages there are not lost.
 
-String literals count as code. Raw string literals, digit separators, and
-backslash line continuations are handled.
+Matches in other files, such as `Makefile` or `Kconfig`, are listed as they
+are and marked *unfiltered*, so you do not lose usages there.
+
+Text inside string literals counts as code. In `.S` assembly files only C
+comments are recognised; matches in assembler comments (`#`, `@`) stay in the
+results.
 
 ## Settings
 
-The search reads the built-in search settings: `search.exclude`,
-`files.exclude`, `search.useIgnoreFiles`, `search.useParentIgnoreFiles`,
-`search.useGlobalIgnoreFiles`, `search.followSymlinks`, `search.smartCase`,
-`search.maxResults`, `search.searchOnType`,
-`search.searchOnTypeDebouncePeriod`, and `search.collapseResults`.
+CodeOnly Search follows your existing search settings, including
+`search.exclude`, `files.exclude`, `search.useIgnoreFiles`,
+`search.followSymlinks`, `search.smartCase`, `search.maxResults`,
+`search.searchOnType`, and `search.collapseResults`.
 
 | Setting | Default | |
 |---|---|---|
-| `codeonly.diagnostics.logExcludedLines` | `false` | Write every hidden line and the reason to the **CodeOnly** output channel |
-| `codeonly.ripgrepPath` | `""` | `rg` to use instead of the one bundled with VS Code (machine setting) |
+| `codeonly.diagnostics.logExcludedLines` | off | List every hidden line, and why it was hidden, in the **CodeOnly** output |
+| `codeonly.ripgrepPath` | empty | Path to a `rg` executable to use instead of the one that comes with VS Code |
 
-## How it works
+## Troubleshooting
 
-The extension runs the ripgrep binary that ships with VS Code (or VS Code
-Server), with the same arguments as the built-in search plus `--json`. For
-each C-family file with matches it lexes the file up to the last match and
-classifies every match as code, comment, or unclassifiable. See
-[ADR-0003](docs/adr/0003-search-backend.md).
+**A line I expected is missing.** Click *comment-only lines hidden* under the
+search box. It turns on `codeonly.diagnostics.logExcludedLines` if needed and
+shows each hidden line with its reason in the **CodeOnly** output.
 
-On an 87k-file kernel tree with a warm cache, a search for `struct device`
-(12k files, 67k lines) completes in about 3 s end to end; with the default
-20,000-result limit, typical searches finish in about 1 s.
+**"ripgrep was not found".** CodeOnly Search uses the search engine that comes
+with VS Code. If it cannot be found, install
+[ripgrep](https://github.com/BurntSushi/ripgrep) and either put `rg` on your
+`PATH` or set `codeonly.ripgrepPath`.
 
-## Limitations
+**Only the first results are shown.** Searches stop at `search.maxResults`
+(20,000 by default). Narrow the search, or raise the limit.
 
-- Only C comment syntax is known. Other languages are not filtered.
-- Multi-line regular expressions are not supported.
-- Files are read as bytes; `files.encoding` is not applied, and UTF-16 files
-  are reported as unclassifiable.
-- Only `file` workspace folders are searched (no virtual file systems).
+## Known limitations
 
-## Development
-
-See [CLAUDE.md](CLAUDE.md) for build and test commands.
+- Only C comment syntax is recognised.
+- A regular expression cannot match across lines.
+- Files are read as UTF-8 or plain bytes; `files.encoding` is not applied.
+  Matches in UTF-16 encoded C files are hidden.
+- Only folders on disk can be searched, not virtual workspaces.

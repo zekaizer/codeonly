@@ -191,7 +191,7 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   private fileItem(node: FileNode): vscode.TreeItem {
     const { result } = node;
     const item = new vscode.TreeItem(vscode.Uri.file(result.absolutePath), this.collapsibleState(node));
-    item.id = `${this.generation}/${result.absolutePath}`;
+    item.id = `f/${this.generation}/${result.absolutePath}`;
     item.iconPath = vscode.ThemeIcon.File;
     item.contextValue = "file";
     const dir = path.posix.dirname(result.relativePath);
@@ -216,11 +216,11 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
       { label: preview.label, highlights: preview.highlights },
       vscode.TreeItemCollapsibleState.None,
     );
-    item.id = `${this.generation}/${node.file.result.absolutePath}:${line.lineNumber}`;
+    item.id = `l/${this.generation}/${node.file.result.absolutePath}:${line.lineNumber}`;
     item.contextValue = "line";
-    item.tooltip = `${node.file.result.relativePath}:${line.lineNumber}\n${line.text.trim()}`;
+    item.tooltip = `${node.file.result.relativePath}:${line.lineNumber}\n${preview.label}`;
     item.accessibilityInformation = {
-      label: `${line.text.trim()}, line ${line.lineNumber} in ${node.file.result.relativePath}`,
+      label: `${preview.label}, line ${line.lineNumber} in ${node.file.result.relativePath}`,
     };
     item.command = { command: "codeonly.openResult", title: "Open Result", arguments: [openArgs(node)] };
     return item;

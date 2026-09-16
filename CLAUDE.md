@@ -28,7 +28,7 @@ First `npm test` downloads VS Code stable into `.vscode-test/` (gitignored). Tes
 
 - `src/extension.ts` — entry point and command wiring, bundled by `esbuild.mjs` into `dist/extension.js`.
 - `src/classify/` — C comment lexer and per-line keep/hide decision. No `vscode` import.
-- `src/search/` — ripgrep location, arguments, JSON stream, and the filtering pipeline (`searchCode`). No `vscode` import, so it runs under plain Node (useful for benchmarks against `out/`).
+- `src/search/` — include/exclude resolution with VS Code's query-builder rules (`scope.ts`), ripgrep location, arguments, JSON stream, and the filtering pipeline (`searchCode`). No `vscode` import, so it runs under plain Node (useful for benchmarks against `out/`).
 - `src/ui/` — VS Code layer: search controller, query webview host, results tree, editor highlights, settings.
 - `src/webview/` — query form script, bundled to `dist/webview/search.js`; type-checked with its own `tsconfig.json` (DOM lib) and excluded from the root one.
 - `src/shared/protocol.ts` — messages between the extension and the webview.

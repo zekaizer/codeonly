@@ -4,7 +4,7 @@ import { isCFamilyFile } from "../classify/cFamily";
 import { classifyRange, scanRegions } from "../classify/cLexer";
 import { REASON_COMMENT_ONLY, decideLine } from "../classify/lineDecision";
 import type { FolderOptions, SearchQuery } from "./query";
-import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, runRipgrep, summarizeRipgrepError } from "./ripgrep";
+import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, queryErrorMessage, runRipgrep } from "./ripgrep";
 
 /** UTF-16 column range within {@link ResultLine.text}. */
 export interface ColumnRange {
@@ -74,6 +74,8 @@ export class SearchError extends Error {
     message: string,
     /** Diagnostic text for the log, e.g. ripgrep's stderr. */
     readonly detail?: string,
+    /** The ripgrep executable could not be started; the query itself may be fine. */
+    readonly ripgrepFailed = false,
   ) {
     super(message);
   }
@@ -105,9 +107,14 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   let excludedLineCount = 0;
   let limitHit = false;
   const warnings: string[] = [];
+  let failure: { error: unknown } | undefined;
+  const fail = (error: unknown) => {
+    failure ??= { error };
+    stop.abort();
+  };
 
   const emit = (result: FileResult) => {
-    if (signal?.aborted || limitHit) {
+    if (signal?.aborted || limitHit || failure) {
       return;
     }
     let lines = result.lines;
@@ -140,9 +147,9 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         folder.path,
         async (file) => {
           sawFile = true;
-          const task = processFile(folder.path, file).then(emit);
+          const task = processFile(folder.path, file).then(emit).catch(fail);
           pending.add(task);
-          void task.finally(() => pending.delete(task)).catch(() => undefined);
+          void task.finally(() => pending.delete(task));
           if (pending.size >= FILE_CONCURRENCY) {
             await Promise.race(pending);
           }
@@ -150,10 +157,14 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         stop.signal,
       );
       await Promise.all(pending);
+      if (failure) {
+        throw failure.error;
+      }
       if (!exit.aborted && exit.code !== 0 && exit.code !== 1) {
         const detail = exit.stderr.trim() || `ripgrep exited with code ${exit.code}`;
-        if (!sawFile) {
-          throw new SearchError(summarizeRipgrepError(detail), detail);
+        const queryError = queryErrorMessage(detail);
+        if (queryError && !sawFile) {
+          throw new SearchError(queryError, detail);
         }
         warnings.push(detail);
       }
@@ -162,7 +173,11 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
     if (e instanceof SearchError) {
       throw e;
     }
-    throw new SearchError(`Search failed: ${e instanceof Error ? e.message : String(e)}`);
+    const message = e instanceof Error ? e.message : String(e);
+    if ((e as NodeJS.ErrnoException).syscall?.startsWith("spawn")) {
+      throw new SearchError(`Could not run ripgrep: ${message}`, message, true);
+    }
+    throw new SearchError(`Search failed: ${message}`, e instanceof Error ? e.stack : message);
   } finally {
     signal?.removeEventListener("abort", forwardAbort);
   }
@@ -179,17 +194,36 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   };
 }
 
-/** Results are per line, so a pattern that can only match across lines would silently find nothing. */
+/** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
+const NEWLINE_ESCAPE = /^(?:n|x0a|x\{0*a\}|u000a|u\{0*a\}|U0000000a|U\{0*a\}|012|o\{0*12\}|cj)/i;
+
+/**
+ * Results are per line, so a pattern that must match a newline would silently find nothing.
+ * Escapes inside a character class are allowed: `[^\n]` is a useful per-line pattern.
+ */
 function hasNewlineEscape(pattern: string): boolean {
+  let inClass = false;
   for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] === "\n") {
+    const ch = pattern[i];
+    if (ch === "\n") {
       return true;
     }
-    if (pattern[i] === "\\") {
-      if (pattern[i + 1] === "n") {
+    if (ch === "\\") {
+      if (!inClass && NEWLINE_ESCAPE.test(pattern.slice(i + 1, i + 12))) {
         return true;
       }
       i++;
+    } else if (inClass) {
+      inClass = ch !== "]";
+    } else if (ch === "[") {
+      inClass = true;
+      // A leading `]` (after an optional `^`) is a class member.
+      if (pattern[i + 1] === "^") {
+        i++;
+      }
+      if (pattern[i + 1] === "]") {
+        i++;
+      }
     }
   }
   return false;
@@ -215,17 +249,32 @@ function truncate(lines: readonly ResultLine[], room: number): ResultLine[] {
   return kept;
 }
 
+type Submatch = RipgrepLine["submatches"][number];
+
+/** ripgrep sends no submatch for an empty match at the end of a last line without a terminator. */
+function matchesOf(line: RipgrepLine): readonly Submatch[] {
+  if (line.submatches.length > 0) {
+    return line.submatches;
+  }
+  const end = line.bytes.length - eolLength(line.bytes);
+  return [{ start: end, end }];
+}
+
 async function processFile(folder: string, file: RipgrepFile): Promise<FileResult> {
   const relativePath = file.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
   const absolutePath = path.join(folder, relativePath);
   const base = { folder, relativePath, absolutePath };
   if (!isCFamilyFile(relativePath)) {
-    return { ...base, filtered: false, lines: file.lines.map((l) => toResultLine(l, l.submatches)), excluded: [] };
+    return { ...base, filtered: false, lines: file.lines.map((l) => toResultLine(l, matchesOf(l))), excluded: [] };
   }
 
+  // A name that is not UTF-8 can only be opened through its bytes.
+  const readPath = file.rawPath
+    ? Buffer.concat([Buffer.from(folder + path.sep), file.rawPath.subarray(file.rawPath.indexOf("./") === 0 ? 2 : 0)])
+    : absolutePath;
   let buf: Buffer;
   try {
-    buf = await fs.promises.readFile(absolutePath);
+    buf = await fs.promises.readFile(readPath);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     return excludeAll(base, file, code ? `${UNREADABLE} (${code})` : UNREADABLE);
@@ -238,9 +287,8 @@ async function processFile(folder: string, file: RipgrepFile): Promise<FileResul
 
   let limit = 0;
   for (const l of file.lines) {
-    const last = l.submatches[l.submatches.length - 1];
-    if (last) {
-      limit = Math.max(limit, shift + l.absoluteOffset + last.end);
+    for (const m of matchesOf(l)) {
+      limit = Math.max(limit, shift + l.absoluteOffset + Math.max(m.end, m.start + 1));
     }
   }
   const regions = scanRegions(buf, limit);
@@ -253,10 +301,19 @@ async function processFile(folder: string, file: RipgrepFile): Promise<FileResul
       excluded.push(toExcludedLine(l, CHANGED));
       continue;
     }
-    const classes = l.submatches.map((m) => classifyRange(regions, at + m.start, at + m.end));
+    const matches = matchesOf(l);
+    const lineEnd = at + l.bytes.length - eolLength(l.bytes);
+    const classes = matches.map((m) => {
+      if (m.end > m.start) {
+        return classifyRange(regions, at + m.start, at + m.end);
+      }
+      // An empty match at a line end belongs to what ends there, e.g. a line comment.
+      const p = at + m.start >= lineEnd && m.start > 0 ? at + m.start - 1 : at + m.start;
+      return classifyRange(regions, p, p + 1);
+    });
     const decision = decideLine(classes);
     if (decision.include) {
-      lines.push(toResultLine(l, l.submatches.filter((_, i) => classes[i].kind === "code")));
+      lines.push(toResultLine(l, matches.filter((_, i) => classes[i].kind === "code")));
     } else {
       excluded.push(toExcludedLine(l, decision.reason ?? REASON_COMMENT_ONLY));
     }
@@ -268,7 +325,7 @@ function excludeAll(base: Pick<FileResult, "folder" | "relativePath" | "absolute
   return { ...base, filtered: true, lines: [], excluded: file.lines.map((l) => toExcludedLine(l, reason)) };
 }
 
-function toResultLine(line: RipgrepLine, submatches: RipgrepLine["submatches"]): ResultLine {
+function toResultLine(line: RipgrepLine, submatches: readonly Submatch[]): ResultLine {
   const text = lineText(line.bytes);
   const ascii = text.length === line.bytes.length - eolLength(line.bytes);
   const column = (byteOffset: number) =>
