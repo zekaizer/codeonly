@@ -34,7 +34,11 @@ export interface ResultCounts {
 
 /** "auto" collapses files with more results than this, as the Search view does. */
 const AUTO_COLLAPSE_THRESHOLD = 10;
-const REFRESH_DELAY_MS = 150;
+/**
+ * VS Code debounces tree refreshes by 200 ms and restarts that wait on every change, so changes
+ * that come more often than this would hold back every refresh until the search ends.
+ */
+const REFRESH_DELAY_MS = 300;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 

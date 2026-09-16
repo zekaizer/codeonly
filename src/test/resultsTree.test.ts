@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import type { FileResult } from "../search/codeSearch";
 import { MatchHighlights } from "../ui/matchHighlights";
 import { ResultsTree } from "../ui/resultsTree";
+import { SearchController } from "../ui/searchController";
 
 function result(text: string): FileResult {
   const at = text.indexOf("needle");
@@ -43,6 +44,56 @@ suite("results tree items", () => {
       const label = typeof item.label === "string" ? item.label : (item.label?.label ?? "");
       assert.ok(label.includes("needle"));
     } finally {
+      tree.dispose();
+    }
+  });
+});
+
+suite("results tree pacing", () => {
+  test("changes during a search are pushed further apart than VS Code's 200 ms tree debounce", async () => {
+    const tree = new ResultsTree(() => "alwaysExpand");
+    const stamps: number[] = [];
+    const sub = tree.onDidChangeTreeData(() => stamps.push(Date.now()));
+    try {
+      const started = Date.now();
+      for (let i = 0; Date.now() - started < 1200; i++) {
+        tree.add({ ...result(`needle ${i}`), relativePath: `f${i}.c`, absolutePath: `/ws/f${i}.c` });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const gaps = stamps.slice(1).map((t, i) => t - stamps[i]);
+      assert.ok(stamps.length >= 2, `only ${stamps.length} refreshes`);
+      assert.ok(Math.min(...gaps) > 220, JSON.stringify(gaps));
+    } finally {
+      sub.dispose();
+      tree.dispose();
+    }
+  });
+});
+
+suite("results view status", () => {
+  test("an unchanged message is not assigned again, since each assignment delays the tree refresh", () => {
+    let assignments = 0;
+    let message: string | undefined;
+    const view = {
+      get message() {
+        return message;
+      },
+      set message(value: string | undefined) {
+        assignments++;
+        message = value;
+      },
+      description: undefined as string | undefined,
+    } as unknown as vscode.TreeView<unknown>;
+    const state = { get: (_k: string, d?: unknown) => d, update: async () => undefined, keys: () => [] } as unknown as vscode.Memento;
+    const log = { info() {}, warn() {}, error() {}, show() {} } as unknown as vscode.LogOutputChannel;
+    const tree = new ResultsTree(() => "alwaysExpand");
+    const controller = new SearchController(state, tree, view, log);
+    try {
+      controller.clear();
+      controller.clear();
+      assert.equal(assignments, 0);
+    } finally {
+      controller.dispose();
       tree.dispose();
     }
   });
