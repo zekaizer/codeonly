@@ -264,7 +264,7 @@ suite("search UI", () => {
     const status = api.status();
     assert.equal(status.kind, "error");
     if (status.kind === "error") {
-      assert.equal(status.message, "Invalid regular expression: unclosed group");
+      assert.equal(status.message, "Invalid regular expression: missing closing parenthesis");
     }
     await api.search({ isRegExp: false });
   });

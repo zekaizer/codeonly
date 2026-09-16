@@ -254,13 +254,14 @@ const STDERR_LIMIT = 64 * 1024;
  * unreadable files, which do not invalidate the search.
  */
 export function queryErrorMessage(stderr: string): string | undefined {
+  // With `--engine auto` PCRE2 is the fallback, so its reason is the one that applies.
+  const pcre = /PCRE2: error compiling pattern(?: at offset \d+)?: (.+)$/m.exec(stderr)?.[1];
+  if (pcre) {
+    return `Invalid regular expression: ${pcre}`;
+  }
   if (/regex parse error/.test(stderr)) {
     const reason = /^error: (.+)$/m.exec(stderr)?.[1];
     return reason ? `Invalid regular expression: ${reason}` : "Invalid regular expression.";
-  }
-  const pcre = /PCRE2: error compiling pattern.*$/m.exec(stderr)?.[0];
-  if (pcre) {
-    return `Invalid regular expression: ${pcre}`;
   }
   if (/the literal "\\n" is not allowed/.test(stderr)) {
     return "Multi-line patterns are not supported.";

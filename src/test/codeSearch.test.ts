@@ -192,7 +192,7 @@ suite("code search pipeline", () => {
   test("invalid regular expression is reported briefly, with ripgrep's text as detail", async () => {
     await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => {
       assert.ok(e instanceof SearchError);
-      assert.equal(e.message, "Invalid regular expression: unclosed group");
+      assert.equal(e.message, "Invalid regular expression: missing closing parenthesis");
       assert.match(e.detail ?? "", /regex parse error/);
       return true;
     });
