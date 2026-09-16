@@ -147,6 +147,35 @@ suite("search UI", () => {
     assert.equal(api.form().pattern, "widget_count");
   });
 
+  test("the focus command can keep the current term", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(doc);
+    editor.selection = new vscode.Selection(4, 12, 4, 12);
+    await vscode.commands.executeCommand("codeonly.focusSearch", { seed: false });
+    assert.equal(api.form().pattern, "widget_init");
+  });
+
+  test("the shortcut does not reseed from inside the view, and Ctrl+Up returns to the search box", () => {
+    const ext = vscode.extensions.getExtension("zekaizer.codeonly");
+    const keys = (ext?.packageJSON.contributes.keybindings ?? []) as {
+      command: string;
+      key: string;
+      when?: string;
+      args?: unknown;
+    }[];
+    const focus = keys.filter((k) => k.command === "codeonly.focusSearch");
+    // Focus inside the webview is not visible to `focusedView`; the view reports it instead.
+    const inView = focus.find((k) => k.key === "ctrl+shift+alt+f" && k.args);
+    assert.equal(inView?.when, "codeonly.queryFocused || focusedView == 'codeonly.results'");
+    assert.deepEqual(inView?.args, { seed: false });
+    const outside = focus.find((k) => k.key === "ctrl+shift+alt+f" && !k.args);
+    assert.equal(outside?.when, "!codeonly.queryFocused && focusedView != 'codeonly.results'");
+    const back = focus.find((k) => k.key === "ctrl+up");
+    assert.equal(back?.when, "focusedView == 'codeonly.results'");
+    assert.deepEqual(back?.args, { seed: false });
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");

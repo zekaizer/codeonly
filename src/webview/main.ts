@@ -255,10 +255,13 @@ statusEl.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("focus", () => {
+  post({ type: "focusChanged", focused: true });
   if (!document.activeElement || document.activeElement === document.body) {
     focusPattern();
   }
 });
+
+window.addEventListener("blur", () => post({ type: "focusChanged", focused: false }));
 
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   const message = event.data;

@@ -248,7 +248,26 @@
       {
         "command": "codeonly.focusSearch",
         "key": "ctrl+shift+alt+f",
-        "mac": "cmd+shift+alt+f"
+        "mac": "cmd+shift+alt+f",
+        "when": "!codeonly.queryFocused && focusedView != 'codeonly.results'"
+      },
+      {
+        "command": "codeonly.focusSearch",
+        "key": "ctrl+shift+alt+f",
+        "mac": "cmd+shift+alt+f",
+        "when": "codeonly.queryFocused || focusedView == 'codeonly.results'",
+        "args": {
+          "seed": false
+        }
+      },
+      {
+        "command": "codeonly.focusSearch",
+        "key": "ctrl+up",
+        "mac": "cmd+up",
+        "when": "focusedView == 'codeonly.results'",
+        "args": {
+          "seed": false
+        }
       }
     ],
     "configuration": {

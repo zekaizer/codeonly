@@ -71,4 +71,6 @@ export type FromWebview =
   | { readonly type: "search"; readonly form: QueryForm; readonly commit: boolean }
   | { readonly type: "formChanged"; readonly form: QueryForm }
   | { readonly type: "cancel" }
+  /** The page gained or lost keyboard focus; the workbench cannot see focus inside a webview. */
+  | { readonly type: "focusChanged"; readonly focused: boolean }
   | { readonly type: "command"; readonly command: StatusCommand };

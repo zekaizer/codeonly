@@ -46,7 +46,8 @@ right-click one or more folders in the Explorer and choose
 **Find Code in Folder (Exclude Comments)...**.
 
 In the results, click a line or press `Enter` to open the file with the match
-selected. Hover a result and click **×** to dismiss it. Right-click a result
+selected. `Ctrl+Up` (`Cmd+Up` on macOS) goes back to the search box.
+Hover a result and click **×** to dismiss it. Right-click a result
 for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
 While results are shown, the matches are also highlighted in open editors.

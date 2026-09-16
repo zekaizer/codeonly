@@ -9,6 +9,7 @@ export interface QueryViewHost {
   onSearch(form: QueryForm, commit: boolean): void;
   onFormChanged(form: QueryForm): void;
   onCancel(): void;
+  onFocusChanged(focused: boolean): void;
   onCommand(command: StatusCommand): void;
 }
 
@@ -35,12 +36,14 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
     view.onDidChangeVisibility(() => {
       if (!view.visible && this.view === view) {
         this.ready = false;
+        this.host.onFocusChanged(false);
       }
     });
     view.onDidDispose(() => {
       if (this.view === view) {
         this.view = undefined;
         this.ready = false;
+        this.host.onFocusChanged(false);
       }
     });
   }
@@ -87,6 +90,9 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
         break;
       case "cancel":
         this.host.onCancel();
+        break;
+      case "focusChanged":
+        this.host.onFocusChanged(message.focused);
         break;
       case "command":
         this.host.onCommand(message.command);

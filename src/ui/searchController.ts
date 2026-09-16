@@ -40,6 +40,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private ripgrep: { configured: string; path: string } | undefined;
   private report: string[] = [];
   private readonly contextValues: Record<string, unknown> = {};
+  private queryFocused = false;
   view: ViewChannel | undefined;
 
   constructor(
@@ -87,6 +88,11 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   onCancel(): void {
     this.abort?.abort();
+  }
+
+  onFocusChanged(focused: boolean): void {
+    this.queryFocused = focused;
+    this.updateContext();
   }
 
   onCommand(command: StatusCommand): void {
@@ -283,8 +289,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
    * searched right away when search-on-type is on; otherwise the old results are cleared so that
    * they are not shown under the new term.
    */
-  async focusSearch(): Promise<void> {
-    const seed = seedFromEditor(this.form.isRegExp);
+  async focusSearch(options: { seed?: boolean } = {}): Promise<void> {
+    const seed = options.seed === false ? undefined : seedFromEditor(this.form.isRegExp);
     const stale = this.status.kind === "idle" || this.status.kind === "error";
     const changed = seed !== undefined && (seed !== this.form.pattern || stale);
     if (changed) {
@@ -400,6 +406,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   /** Context keys are derived from the status and the tree only, so no code path can leave them stale. */
   private updateContext(): void {
     const values: Record<string, unknown> = {
+      "codeonly.queryFocused": this.queryFocused,
       "codeonly.state": this.status.kind,
       "codeonly.searching": this.status.kind === "searching",
       "codeonly.hasResults": !this.tree.isEmpty,
