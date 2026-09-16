@@ -116,6 +116,20 @@ suite("search path for an Explorer selection", () => {
     assert.deepEqual(resolveScope(whole, "", roots, HOME), [{ path: "/b/drivers", includes: [], excludes: [] }]);
   });
 
+  test("a same-named folder whose path has glob characters is still searched from itself", () => {
+    const roots = [
+      { name: "common", path: "/w/a (old)/common" },
+      { name: "common", path: "/w/b/common" },
+    ];
+    const text = searchPathFor("/w/a (old)/common/drivers", roots[0], roots);
+    assert.deepEqual(resolveScope(text, "", roots, HOME), [
+      { path: "/w/a (old)/common", includes: ["drivers", "drivers/**"], excludes: [] },
+    ]);
+    assert.deepEqual(resolveScope(searchPathFor(roots[0].path, roots[0], roots), "", roots, HOME), [
+      { path: "/w/a (old)/common", includes: [], excludes: [] },
+    ]);
+  });
+
   test("multi-root folder names with glob characters still search that folder", () => {
     const odd = { name: "a[1] (6.12)", path: "/root/a[1] (6.12)" };
     const roots = [odd, multi[1]];
@@ -144,5 +158,21 @@ suite("owning search root", () => {
     assert.equal(deepestRoot("/w/a/x.c", roots), "/w/a");
     assert.equal(deepestRoot("/w/ab/x.c", roots), undefined);
     assert.equal(deepestRoot("/w/c/d/x.c", roots), "/w/c");
+  });
+});
+
+suite("workspace file with one folder", () => {
+  test("uses the multi-root rules, as VS Code does when a workspace file is open", () => {
+    assert.deepEqual(resolveScope("./ws/src", "./ws/out", single, HOME, true), [
+      { path: "/ws", includes: ["src", "src/**"], excludes: ["out", "out/**"] },
+    ]);
+    assert.throws(() => resolveScope("./src", "", single, HOME, true), ScopeError);
+    assert.equal(searchPathFor("/ws/src", single[0], single, true), "./ws/src");
+    assert.equal(searchPathFor("/ws", single[0], single, true), "./ws");
+  });
+
+  test("a single folder opened directly keeps the single-root rules", () => {
+    assert.deepEqual(resolveScope("./src", "", single, HOME, false), [{ path: "/ws", includes: ["src", "src/**"], excludes: [] }]);
+    assert.equal(searchPathFor("/ws/src", single[0], single, false), "./src");
   });
 });

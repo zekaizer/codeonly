@@ -245,6 +245,17 @@ suite("search UI", () => {
     await api.search({ pattern: "widget_count" });
   });
 
+  test("after dismissing the selected result, next result continues from there", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(path.basename(vscode.window.activeTextEditor?.document.uri.fsPath ?? ""), "notes.txt");
+    await vscode.commands.executeCommand("codeonly.dismiss");
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const editor = vscode.window.activeTextEditor;
+    assert.equal(path.basename(editor?.document.uri.fsPath ?? ""), "Makefile");
+    assert.equal(editor?.selection.active.line, 1);
+  });
+
   test("next result reuses an editor group where the file is already visible", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));

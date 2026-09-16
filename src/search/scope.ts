@@ -27,13 +27,19 @@ export class ScopeError extends Error {
 const GLOB_CHARS = /[*?[\]{}(),]/;
 
 /**
- * Include text that selects `target` (an Explorer selection inside `root`). In a multi-root
- * workspace `./<name>` names the folder, unless another folder has the same name; then the
- * absolute path is used, as the Search view does.
+ * Include text that selects `target` (an Explorer selection inside `root`). With multi-root rules
+ * `./<name>` names the folder, unless another folder has the same name; then the absolute path is
+ * used, as the Search view does. `multiRoot` is true whenever a workspace file is open, even with
+ * a single folder, because VS Code decides it that way.
  */
-export function searchPathFor(target: string, root: WorkspaceRoot, roots: readonly WorkspaceRoot[]): string {
+export function searchPathFor(
+  target: string,
+  root: WorkspaceRoot,
+  roots: readonly WorkspaceRoot[],
+  multiRoot = roots.length > 1,
+): string {
   const rel = toSlash(path.relative(root.path, target));
-  if (roots.length <= 1) {
+  if (!multiRoot) {
     return rel ? `./${escapeGlob(rel)}` : "";
   }
   if (roots.filter((r) => r.name === root.name).length > 1) {
@@ -57,7 +63,8 @@ interface Parsed {
 /**
  * Turns the Search view's "files to include/exclude" text into ripgrep runs, following VS Code's
  * query builder: paths (`./x`, `../x`, `~/x`, absolute) choose what to search, other entries are
- * globs matched at any depth. In a multi-root workspace `./<folder>/...` selects that folder.
+ * globs matched at any depth. With multi-root rules (`multiRoot`, see {@link searchPathFor})
+ * `./<folder>/...` selects that folder.
  *
  * @throws ScopeError if `./<name>` names no folder of a multi-root workspace.
  */
@@ -66,9 +73,10 @@ export function resolveScope(
   excludes: string,
   roots: readonly WorkspaceRoot[],
   homedir: string,
+  multiRoot = roots.length > 1,
 ): ScopedFolder[] {
-  const included = parse(includes, roots, homedir, "includes");
-  const excluded = parse(excludes, roots, homedir, "excludes");
+  const included = parse(includes, roots, homedir, multiRoot, "includes");
+  const excluded = parse(excludes, roots, homedir, multiRoot, "excludes");
   const targets: SearchPath[] =
     included.searchPaths.length > 0 ? included.searchPaths : roots.map((r) => ({ root: r.path }));
   const out: ScopedFolder[] = [];
@@ -103,7 +111,13 @@ function isInside(dir: string, file: string): boolean {
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 }
 
-function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, field: ScopeError["field"]): Parsed {
+function parse(
+  text: string,
+  roots: readonly WorkspaceRoot[],
+  homedir: string,
+  multiRoot: boolean,
+  field: ScopeError["field"],
+): Parsed {
   const items = splitGlobList(toSlash(text)).map((p) => p.replace(/^~($|\/)/, `${toSlash(homedir)}$1`));
   const globs: string[] = [];
   const byRoot = new Map<string, SearchPath>();
@@ -117,7 +131,7 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, f
     }
   };
   for (const item of items) {
-    const named = roots.length > 1 ? escapedFolderPrefix(item, roots) : undefined;
+    const named = escapedFolderPrefix(item, roots, multiRoot);
     if (named) {
       add(named.root, named.rest ? normalizePattern(named.rest) : undefined);
       continue;
@@ -132,7 +146,7 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, f
     }
     const { pathPortion, globPortion } = splitPathAndGlob(item);
     const glob = globPortion === undefined ? undefined : normalizePattern(globPortion);
-    for (const { root, pattern } of expandSearchPath(pathPortion, roots, field)) {
+    for (const { root, pattern } of expandSearchPath(pathPortion, roots, multiRoot, field)) {
       add(root, pattern && glob ? `${pattern}/${glob}` : pattern || glob);
     }
   }
@@ -140,23 +154,32 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, f
 }
 
 /**
- * `./<escaped folder name>/rest` for a folder whose name has glob characters. VS Code's parser
- * would split such a name at its first glob character and lose the folder, so it is matched first.
+ * A folder written with glob characters escaped: `./<name>/rest` (multi-root) or its absolute
+ * path. VS Code's parser would split such text at the first glob character and search from a
+ * parent folder, so it is matched to the folder first. The longest match wins.
  */
-function escapedFolderPrefix(item: string, roots: readonly WorkspaceRoot[]): { root: string; rest: string } | undefined {
+function escapedFolderPrefix(
+  item: string,
+  roots: readonly WorkspaceRoot[],
+  multiRoot: boolean,
+): { root: string; rest: string } | undefined {
+  let best: { root: string; rest: string; length: number } | undefined;
   for (const root of roots) {
-    if (!GLOB_CHARS.test(root.name)) {
-      continue;
+    const prefixes: string[] = [];
+    if (multiRoot && GLOB_CHARS.test(root.name)) {
+      prefixes.push(`./${escapeGlob(root.name)}`);
     }
-    const prefix = `./${escapeGlob(root.name)}`;
-    if (item === prefix || item === `${prefix}/`) {
-      return { root: root.path, rest: "" };
+    if (GLOB_CHARS.test(root.path)) {
+      prefixes.push(escapeGlob(toSlash(root.path)));
     }
-    if (item.startsWith(`${prefix}/`)) {
-      return { root: root.path, rest: item.slice(prefix.length + 1) };
+    for (const prefix of prefixes) {
+      const rest = item === prefix || item === `${prefix}/` ? "" : item.startsWith(`${prefix}/`) ? item.slice(prefix.length + 1) : undefined;
+      if (rest !== undefined && (!best || prefix.length > best.length)) {
+        best = { root: root.path, rest, length: prefix.length };
+      }
     }
   }
-  return undefined;
+  return best && { root: best.root, rest: best.rest };
 }
 
 function isSearchPath(item: string): boolean {
@@ -182,13 +205,17 @@ function splitPathAndGlob(item: string): { pathPortion: string; globPortion?: st
 function expandSearchPath(
   item: string,
   roots: readonly WorkspaceRoot[],
+  multiRoot: boolean,
   field: ScopeError["field"],
 ): { root: string; pattern?: string }[] {
   if (path.isAbsolute(item)) {
     return [{ root: trimSeparators(path.normalize(item)) }];
   }
-  if (roots.length === 1) {
+  if (!multiRoot) {
     const [folder] = roots;
+    if (!folder) {
+      return [];
+    }
     if (item === ".." || item.startsWith("../")) {
       return [{ root: trimSeparators(path.resolve(folder.path, item)) }];
     }
