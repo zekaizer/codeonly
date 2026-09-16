@@ -273,6 +273,12 @@ suite("search UI", () => {
     await api.search({ includes: "" });
   });
 
+  test("a file path next to a folder path does not hide the folder's other files", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: `${path.join(FIXTURE, "src", "bom.c")}, ./` });
+    assert.equal(summary?.fileCount, 3);
+    await api.search({ includes: "" });
+  });
+
   test("an invalid range in an include glob is reported as a file pattern error", async () => {
     await api.search({ ...base, pattern: "widget_init", includes: "[b-a].c" });
     const status = api.status();

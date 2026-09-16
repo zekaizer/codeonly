@@ -191,7 +191,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
-    const targets: SearchTarget[] = searchable.map((scope) => ({
+    const targets: SearchTarget[] = searchable.map(({ fileOnly, ...scope }) => ({
+      fileOnly,
       folder: { path: scope.path, options: settings.folderOptions(vscode.Uri.file(scope.path)) },
       query: {
         pattern: form.pattern,
@@ -502,20 +503,27 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 interface SearchTarget {
   readonly folder: SearchFolder;
   readonly query: SearchQuery;
+  /** Searches one file through its folder; that folder does not own the other files below it. */
+  readonly fileOnly: boolean;
 }
 
 /**
  * Keeps the roots that exist, as VS Code does. A file becomes its folder with an include for
  * just that file, since ripgrep cannot run inside a file.
  */
-async function existingRoots(scoped: readonly ScopedFolder[]): Promise<ScopedFolder[]> {
-  const out: ScopedFolder[] = [];
+async function existingRoots(scoped: readonly ScopedFolder[]): Promise<(ScopedFolder & { fileOnly: boolean })[]> {
+  const out: (ScopedFolder & { fileOnly: boolean })[] = [];
   for (const scope of scoped) {
     const stat = await fs.promises.stat(scope.path).catch(() => undefined);
     if (stat?.isDirectory()) {
-      out.push(scope);
+      out.push({ ...scope, fileOnly: false });
     } else if (stat?.isFile()) {
-      out.push({ path: path.dirname(scope.path), includes: [escapeGlob(path.basename(scope.path))], excludes: scope.excludes });
+      out.push({
+        path: path.dirname(scope.path),
+        includes: [escapeGlob(path.basename(scope.path))],
+        excludes: scope.excludes,
+        fileOnly: true,
+      });
     }
   }
   return out;
@@ -531,8 +539,8 @@ async function searchTargets(
   skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
-  const roots = targets.map((t) => t.folder.path);
-  for (const { folder, query } of targets) {
+  const roots = targets.filter((t) => !t.fileOnly).map((t) => t.folder.path);
+  for (const { folder, query, fileOnly } of targets) {
     const remaining = maxResults === undefined ? undefined : maxResults - (total?.matchCount ?? 0);
     const summary = await searchCode({
       rgPath,
@@ -541,7 +549,7 @@ async function searchTargets(
       maxResults: remaining,
       signal,
       // A hit below a more specific searched root belongs to that root's run.
-      skip: (file) => skip(file) || deepestRoot(file, roots) !== folder.path,
+      skip: (file) => skip(file) || (!fileOnly && deepestRoot(file, roots) !== folder.path),
       onResult,
     });
     total = total ? merge(total, summary) : summary;
