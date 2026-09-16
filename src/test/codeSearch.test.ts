@@ -298,4 +298,19 @@ suite("code search pipeline edge cases", () => {
     }
   });
 
+  test("an error while handling a result fails the search", async () => {
+    const dir = workspace(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}.c`, "int widget_many;\n"])));
+    let calls = 0;
+    await assert.rejects(
+      run(dir, "widget_many", {}, () => {
+        calls++;
+        throw new Error("boom");
+      }),
+      (e: unknown) => e instanceof SearchError && /boom/.test(e.message),
+    );
+    const settled = calls;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(calls, settled, "results kept arriving after the search failed");
+  });
+
 });

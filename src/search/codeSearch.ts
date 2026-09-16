@@ -107,9 +107,14 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   let excludedLineCount = 0;
   let limitHit = false;
   const warnings: string[] = [];
+  let failure: { error: unknown } | undefined;
+  const fail = (error: unknown) => {
+    failure ??= { error };
+    stop.abort();
+  };
 
   const emit = (result: FileResult) => {
-    if (signal?.aborted || limitHit) {
+    if (signal?.aborted || limitHit || failure) {
       return;
     }
     let lines = result.lines;
@@ -142,9 +147,9 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         folder.path,
         async (file) => {
           sawFile = true;
-          const task = processFile(folder.path, file).then(emit);
+          const task = processFile(folder.path, file).then(emit).catch(fail);
           pending.add(task);
-          void task.finally(() => pending.delete(task)).catch(() => undefined);
+          void task.finally(() => pending.delete(task));
           if (pending.size >= FILE_CONCURRENCY) {
             await Promise.race(pending);
           }
@@ -152,6 +157,9 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         stop.signal,
       );
       await Promise.all(pending);
+      if (failure) {
+        throw failure.error;
+      }
       if (!exit.aborted && exit.code !== 0 && exit.code !== 1) {
         const detail = exit.stderr.trim() || `ripgrep exited with code ${exit.code}`;
         const queryError = queryErrorMessage(detail);
