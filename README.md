@@ -45,12 +45,9 @@ view, for example `*.c, ./drivers/gpu` or `**/tests/**`. You can also
 right-click one or more folders in the Explorer and choose
 **Find Code in Folder (Exclude Comments)...**.
 
-| In the results | |
-|---|---|
-| Click, or `Enter` | Open the file with the match selected |
-| `Ctrl+Enter` | Open to the side |
-| `Delete` | Dismiss the result |
-| `Ctrl+C` | Copy the line, or the path of a file |
+In the results, click a line or press `Enter` to open the file with the match
+selected. Hover a result and click **×** to dismiss it. Right-click a result
+for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
 While results are shown, the matches are also highlighted in open editors.
 **CodeOnly: Go to Next Result** and **CodeOnly: Go to Previous Result** are in
