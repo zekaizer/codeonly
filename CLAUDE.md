@@ -2,9 +2,38 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state
+## Commands
 
-Pre-implementation workspace. There is no source code, build system, test runner, or git repository yet. The only content is the spec pipeline under `intent/`. Do not invent build or test commands; add them here once a toolchain exists.
+```bash
+npm install                 # once; also after package.json changes
+npm run compile             # tsc --noEmit + eslint + esbuild bundle → dist/extension.js
+npm run watch               # esbuild watch (used by the F5 "Run Extension" launch config)
+npm run check-types         # tsc --noEmit only
+npm run lint                # eslint src
+npm test                    # integration tests in a real VS Code host (pretest builds out/ and dist/)
+xvfb-run -a npm test        # same, on a headless machine (no DISPLAY)
+npm run package             # production bundle (minified, no sourcemap)
+```
+
+Run a single test file or case by filtering mocha through the test CLI:
+
+```bash
+npm run pretest && npx vscode-test --grep "activates"
+```
+
+First `npm test` downloads VS Code stable into `.vscode-test/` (gitignored). Tests use mocha's `tdd` UI (`suite`/`test`), not `describe`/`it`.
+
+## Layout and build outputs
+
+- `src/extension.ts` — entry point, bundled by `esbuild.mjs` into `dist/` (what VS Code loads).
+- `src/test/**/*.test.ts` — compiled by `tsc` into `out/`, discovered by `.vscode-test.mjs`.
+- Two outputs on purpose: `dist/` is a single CJS bundle with `vscode` external; `out/` is plain tsc output for mocha. See ADR-0002.
+- TypeScript 6 does not auto-include `@types/*`; add any new `@types` package to `types` in `tsconfig.json` or it will not resolve.
+- Extension ID in tests is `zekaizer.codeonly` (`publisher.name` from package.json).
+
+## Decisions
+
+ADRs live in `docs/adr/`. ADR-0001 fixes delivery as a VS Code extension; ADR-0002 fixes the toolchain (TypeScript 6, esbuild, npm, `@vscode/test-cli`). TypeScript 7 is blocked until typescript-eslint supports it.
 
 ## Document pipeline
 
