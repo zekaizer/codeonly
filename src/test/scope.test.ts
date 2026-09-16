@@ -1,5 +1,4 @@
 import * as assert from "node:assert/strict";
-import * as path from "node:path";
 import { compileGlobs } from "../search/glob";
 import { ScopeError, type ScopedFolder, deepestRoot, resolveScope, searchPathFor } from "../search/scope";
 
@@ -117,16 +116,19 @@ suite("search path for an Explorer selection", () => {
     assert.deepEqual(resolveScope(whole, "", roots, HOME), [{ path: "/b/drivers", includes: [], excludes: [] }]);
   });
 
-  test("multi-root folder names with glob characters fall back to an absolute path that still resolves", () => {
-    const odd = { name: "a[1]", path: "/root/a[1]" };
+  test("multi-root folder names with glob characters still search that folder", () => {
+    const odd = { name: "a[1] (6.12)", path: "/root/a[1] (6.12)" };
     const roots = [odd, multi[1]];
-    const text = searchPathFor("/root/a[1]/src", odd, roots);
-    assert.equal(text, "/root/a[[]1[]]/src");
-    const [scoped] = resolveScope(text, "", roots, HOME);
+    const text = searchPathFor("/root/a[1] (6.12)/src", odd, roots);
+    assert.equal(text, "./a[[]1[]] (6.12)/src");
+    assert.deepEqual(resolveScope(text, "", roots, HOME), [{ path: "/root/a[1] (6.12)", includes: ["src", "src/**"], excludes: [] }]);
+    assert.deepEqual(resolveScope(searchPathFor(odd.path, odd, roots), "", roots, HOME), [
+      { path: "/root/a[1] (6.12)", includes: [], excludes: [] },
+    ]);
+    const [scoped] = resolveScope("./a[[]1[]] (6.12)/src/*.c", "", roots, HOME);
     const matcher = compileGlobs(scoped.includes, false);
-    assert.ok(matcher);
-    assert.ok(matcher(path.posix.relative(scoped.path, "/root/a[1]/src/x.c")));
-    assert.ok(!matcher(path.posix.relative(scoped.path, "/root/a[1]/lib/x.c")));
+    assert.ok(matcher?.("src/x.c"));
+    assert.ok(!matcher?.("lib/x.c"));
   });
 
   test("scope errors name the field they come from", () => {

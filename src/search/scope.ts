@@ -23,20 +23,24 @@ export class ScopeError extends Error {
   }
 }
 
+/** Characters that make VS Code's include parser treat a path segment as a glob. */
+const GLOB_CHARS = /[*?[\]{}(),]/;
+
 /**
  * Include text that selects `target` (an Explorer selection inside `root`). In a multi-root
- * workspace `./<name>` names the folder, unless another folder has the same name or the name has
- * glob characters; then the absolute path is used, as the Search view does.
+ * workspace `./<name>` names the folder, unless another folder has the same name; then the
+ * absolute path is used, as the Search view does.
  */
 export function searchPathFor(target: string, root: WorkspaceRoot, roots: readonly WorkspaceRoot[]): string {
   const rel = toSlash(path.relative(root.path, target));
   if (roots.length <= 1) {
     return rel ? `./${escapeGlob(rel)}` : "";
   }
-  if (roots.filter((r) => r.name === root.name).length > 1 || /[*?[\]{}(),]/.test(root.name)) {
+  if (roots.filter((r) => r.name === root.name).length > 1) {
     return escapeGlob(toSlash(target));
   }
-  return rel ? `./${root.name}/${escapeGlob(rel)}` : `./${root.name}`;
+  const name = escapeGlob(root.name);
+  return rel ? `./${name}/${escapeGlob(rel)}` : `./${name}`;
 }
 
 interface SearchPath {
@@ -103,7 +107,21 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, f
   const items = splitGlobList(toSlash(text)).map((p) => p.replace(/^~($|\/)/, `${toSlash(homedir)}$1`));
   const globs: string[] = [];
   const byRoot = new Map<string, SearchPath>();
+  const add = (root: string, combined: string | undefined) => {
+    const patterns = combined ? (combined.endsWith("**") ? [combined] : [combined, `${combined}/**`]) : undefined;
+    const existing = byRoot.get(root);
+    if (!existing) {
+      byRoot.set(root, { root, patterns });
+    } else if (patterns) {
+      existing.patterns = [...(existing.patterns ?? []), ...patterns];
+    }
+  };
   for (const item of items) {
+    const named = roots.length > 1 ? escapedFolderPrefix(item, roots) : undefined;
+    if (named) {
+      add(named.root, named.rest ? normalizePattern(named.rest) : undefined);
+      continue;
+    }
     if (!isSearchPath(item)) {
       let glob = item.replace(/\/+$/, "");
       if (glob.startsWith(".")) {
@@ -115,17 +133,30 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, f
     const { pathPortion, globPortion } = splitPathAndGlob(item);
     const glob = globPortion === undefined ? undefined : normalizePattern(globPortion);
     for (const { root, pattern } of expandSearchPath(pathPortion, roots, field)) {
-      const combined = pattern && glob ? `${pattern}/${glob}` : pattern || glob;
-      const patterns = combined ? (combined.endsWith("**") ? [combined] : [combined, `${combined}/**`]) : undefined;
-      const existing = byRoot.get(root);
-      if (!existing) {
-        byRoot.set(root, { root, patterns });
-      } else if (patterns) {
-        existing.patterns = [...(existing.patterns ?? []), ...patterns];
-      }
+      add(root, pattern && glob ? `${pattern}/${glob}` : pattern || glob);
     }
   }
   return { searchPaths: [...byRoot.values()], globs };
+}
+
+/**
+ * `./<escaped folder name>/rest` for a folder whose name has glob characters. VS Code's parser
+ * would split such a name at its first glob character and lose the folder, so it is matched first.
+ */
+function escapedFolderPrefix(item: string, roots: readonly WorkspaceRoot[]): { root: string; rest: string } | undefined {
+  for (const root of roots) {
+    if (!GLOB_CHARS.test(root.name)) {
+      continue;
+    }
+    const prefix = `./${escapeGlob(root.name)}`;
+    if (item === prefix || item === `${prefix}/`) {
+      return { root: root.path, rest: "" };
+    }
+    if (item.startsWith(`${prefix}/`)) {
+      return { root: root.path, rest: item.slice(prefix.length + 1) };
+    }
+  }
+  return undefined;
 }
 
 function isSearchPath(item: string): boolean {
