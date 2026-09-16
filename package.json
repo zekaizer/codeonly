@@ -276,6 +276,11 @@
           "markdownDescription": "Write every hidden result line, with the reason it was hidden, to the **CodeOnly** output channel."
         }
       }
+    },
+    "configurationDefaults": {
+      "terminal.integrated.commandsToSkipShell": [
+        "codeonly.focusSearch"
+      ]
     }
   },
   "scripts": {
