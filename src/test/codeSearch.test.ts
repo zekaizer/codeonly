@@ -328,7 +328,7 @@ suite("code search pipeline edge cases", () => {
   test("newline escapes are rejected only where they would have to match a newline", async () => {
     const dir = workspace({ "a.c": "int widget_nl;\n" });
     assert.deepEqual(shown(await run(dir, "int [^\\n]*widget_nl", { isRegExp: true }), "a.c"), [1]);
-    for (const pattern of ["widget_nl\\x0a", "widget_nl\\x{A}", "widget_nl\\u000a", "widget_nl\\n"]) {
+    for (const pattern of ["widget_nl\\x0a", "widget_nl\\x{A}", "widget_nl\\u000a", "widget_nl\\n", "widget_nl;\\r", "widget_nl;\\x0D"]) {
       await assert.rejects(run(dir, pattern, { isRegExp: true }), /Multi-line/, pattern);
     }
   });
