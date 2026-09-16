@@ -1,5 +1,8 @@
 import * as assert from "node:assert/strict";
+import * as path from "node:path";
+import * as vscode from "vscode";
 import type { FileResult } from "../search/codeSearch";
+import { MatchHighlights } from "../ui/matchHighlights";
 import { ResultsTree } from "../ui/resultsTree";
 
 function result(text: string): FileResult {
@@ -41,6 +44,35 @@ suite("results tree items", () => {
       assert.ok(label.includes("needle"));
     } finally {
       tree.dispose();
+    }
+  });
+});
+
+suite("editor highlights", () => {
+  test("a document edited while the search runs gets no highlights", async () => {
+    const file = path.resolve(__dirname, "../../test-fixtures/workspace/src/main.c");
+    const uri = vscode.Uri.file(file);
+    const tree = new ResultsTree(() => "alwaysExpand");
+    const highlights = new MatchHighlights(tree, () => true);
+    const editor = await vscode.window.showTextDocument(uri);
+    try {
+      tree.reset([]);
+      await editor.edit((b) => b.insert(new vscode.Position(0, 0), "\n"));
+      tree.add({
+        folder: path.dirname(file),
+        relativePath: "main.c",
+        absolutePath: file,
+        filtered: true,
+        lines: [{ lineNumber: 3, text: "static int widget_init(void)", ranges: [{ start: 11, end: 22 }] }],
+        excluded: [],
+      });
+      tree.refresh();
+      assert.deepEqual(highlights.rangesFor(uri), []);
+    } finally {
+      highlights.dispose();
+      tree.dispose();
+      await vscode.commands.executeCommand("workbench.action.files.revert");
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     }
   });
 });

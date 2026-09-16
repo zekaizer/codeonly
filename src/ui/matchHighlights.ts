@@ -26,10 +26,13 @@ export class MatchHighlights implements vscode.Disposable {
       tree.onDidReset(() => this.markUnsavedStale()),
       tree.onDidChangeTreeData(() => this.update()),
       vscode.window.onDidChangeVisibleTextEditors(() => this.update()),
+      // Any edit counts, also to a file whose results have not arrived yet.
       vscode.workspace.onDidChangeTextDocument((e) => {
-        if (e.contentChanges.length > 0 && tree.fileFor(e.document.uri)) {
+        if (e.contentChanges.length > 0 && !this.stale.has(e.document.uri.toString())) {
           this.stale.add(e.document.uri.toString());
-          this.update();
+          if (tree.fileFor(e.document.uri)) {
+            this.update();
+          }
         }
       }),
     ];
