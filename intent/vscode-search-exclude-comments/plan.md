@@ -36,5 +36,5 @@ The search and classification modules do not import `vscode`, so they are unit-t
 | R5    | Integration test: activating a result opens the file with the cursor on that line. | pass |
 | IC1   | Integration test: result entry carries path, line number, and original line text. | pass |
 | NFR2  | Integration test: excluded list holds the R1' line with reason `comment-only match`. | pass |
-| NFR1' | Benchmark: three symbols on the android16-6.12 tree, warm cache, under D2. | pass: `struct device` 3.06 s, `mutex_lock` 1.71 s, `kmalloc` 1.13 s without a result limit |
+| NFR1' | Benchmark: three symbols on the android16-6.12 tree, warm cache, under D2. | pass: `struct device` 3.06 s, `mutex_lock` 1.71 s, `kmalloc` 1.13 s without a result limit; in VS Code with the results view visible, `struct device` (70,757 results) 4.0–5.8 s vs 3.5–3.7 s hidden |
 | R7    | Bundled ripgrep path resolves in the installed VS Code server layout; end-to-end check over Remote-SSH by the user. | path resolves for servers 1.129–1.138; end to end with the extension in VS Code Server 1.138's server-side extension host (web client); Remote-SSH check by the user pending |
