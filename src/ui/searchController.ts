@@ -358,6 +358,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private setForm(form: QueryForm, notifyView: boolean): void {
     this.form = form;
     void this.state.update(FORM_KEY, form);
+    this.updateContext();
     if (notifyView) {
       this.view?.post({ type: "form", form, focus: false });
     }
@@ -406,6 +407,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   /** Context keys are derived from the status and the tree only, so no code path can leave them stale. */
   private updateContext(): void {
     const values: Record<string, unknown> = {
+      "codeonly.hasPattern": this.form.pattern !== "",
       "codeonly.queryFocused": this.queryFocused,
       "codeonly.state": this.status.kind,
       "codeonly.searching": this.status.kind === "searching",

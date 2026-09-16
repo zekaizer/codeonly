@@ -176,6 +176,23 @@ suite("search UI", () => {
     assert.deepEqual(back?.args, { seed: false });
   });
 
+  test("hasPattern follows the search term, and Search Again and Clear use it", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    for (const entry of await api.resultTree()) {
+      await vscode.commands.executeCommand("codeonly.dismiss", entry.node);
+    }
+    assert.equal(api.contextKeys()["codeonly.hasPattern"], true);
+    await vscode.commands.executeCommand("codeonly.clear");
+    assert.equal(api.contextKeys()["codeonly.hasPattern"], false);
+    const ext = vscode.extensions.getExtension("zekaizer.codeonly");
+    const commands = (ext?.packageJSON.contributes.commands ?? []) as { command: string; enablement?: string }[];
+    assert.equal(commands.find((c) => c.command === "codeonly.rerun")?.enablement, "codeonly.hasPattern");
+    assert.equal(
+      commands.find((c) => c.command === "codeonly.clear")?.enablement,
+      "codeonly.hasPattern || codeonly.hasResults || codeonly.state != idle",
+    );
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");

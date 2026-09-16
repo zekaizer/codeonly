@@ -70,7 +70,7 @@
         "title": "Search Again",
         "category": "CodeOnly",
         "icon": "$(refresh)",
-        "enablement": "codeonly.state != idle"
+        "enablement": "codeonly.hasPattern"
       },
       {
         "command": "codeonly.cancel",
@@ -83,7 +83,7 @@
         "title": "Clear Search Results",
         "category": "CodeOnly",
         "icon": "$(clear-all)",
-        "enablement": "codeonly.state != idle"
+        "enablement": "codeonly.hasPattern || codeonly.hasResults || codeonly.state != idle"
       },
       {
         "command": "codeonly.expandAll",
