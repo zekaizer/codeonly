@@ -50,8 +50,8 @@ D2. (decided) Upper bound for NFR1' is 10 s with a warm page cache. Basis: U3. (
 D3. (decided) Diagnostic output goes to the Output panel (`CodeOnly` log channel), enabled by a setting. (delegated to the implementer by the user, 2026-09-17)
 
 ## 10. Unverified + next actions
-U1. Measure the actual comment-match ratio — check: search three commonly used symbols, count the share of comment lines. Low priority.
 (U2 closed by user answer: acceptable wait is on the order of tens of seconds)
+(U1 closed 2026-09-17: whole-word, case-sensitive searches on android16-6.12; the comment-only share of matched C-family lines is 0.2–18.5 % across 12 symbols, e.g. `mutex_lock` 0.2 %, `kmalloc` 9.2 %, `rcu_read_lock` 9.9 %, `CONFIG_PM` 18.5 %. Far below A1's "roughly half"; see RISK1.)
 (U3 closed 2026-09-17: ripgrep with VS Code's arguments, `struct device` on android16-6.12 — 3.5 s cold, 0.47 s warm; 12,326 files, 67,799 lines)
 
 ## 11. Discarded — wrong premises
