@@ -118,7 +118,7 @@ function expandSearchPath(item: string, roots: readonly WorkspaceRoot[]): { root
     if (item === ".." || item.startsWith("../")) {
       return [{ root: trimSeparators(path.resolve(folder.path, item)) }];
     }
-    return [{ root: folder.path, pattern: item === "." ? "" : normalizePattern(item) }];
+    return [{ root: folder.path, pattern: normalizePattern(item) }];
   }
   if (item === "./") {
     return [];

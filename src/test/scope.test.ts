@@ -61,6 +61,12 @@ suite("search scope (VS Code include/exclude semantics)", () => {
     assert.deepEqual(scope("./", "", multi).length, 2);
   });
 
+  test("a lone dot is kept as a literal pattern, as VS Code does", () => {
+    assert.deepEqual(scope("."), [{ path: "/ws", includes: [".", "./**"], excludes: [] }]);
+    assert.deepEqual(scope("", "."), [{ path: "/ws", includes: [], excludes: [".", "./**"] }]);
+    assert.deepEqual(scope("./."), scope("."));
+  });
+
   test("an unknown folder name is an error", () => {
     assert.throws(() => scope("./nope/src", "", multi), (e: unknown) => e instanceof ScopeError && /nope/.test(e.message));
   });
