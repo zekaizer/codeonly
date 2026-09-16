@@ -1,0 +1,485 @@
+import * as path from "node:path";
+import * as vscode from "vscode";
+import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
+import { type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
+import { locateRipgrep } from "../search/ripgrep";
+import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
+import type { QueryViewHost } from "./queryView";
+import type { ResultsTree } from "./resultsTree";
+import * as settings from "./settings";
+
+export const RESULTS_VIEW_ID = "codeonly.results";
+
+const FORM_KEY = "codeonly.form";
+const HISTORY_KEY = "codeonly.history";
+const HISTORY_LIMIT = 50;
+const PROGRESS_INTERVAL_MS = 250;
+
+export interface ViewChannel {
+  post(message: ToWebview): void;
+  focusInput(): void;
+}
+
+interface HiddenLine {
+  readonly location: string;
+  readonly lineNumber: number;
+  readonly reason: string;
+  readonly text: string;
+}
+
+/** Owns the query, runs searches, and keeps the query view, results tree, and log in sync. */
+export class SearchController implements QueryViewHost, vscode.Disposable {
+  private form: QueryForm;
+  private history: string[];
+  private status: SearchStatus = { kind: "idle" };
+  private runId = 0;
+  private abort: AbortController | undefined;
+  private ripgrep: { configured: string; path: string } | undefined;
+  private report: string[] = [];
+  view: ViewChannel | undefined;
+
+  constructor(
+    private readonly state: vscode.Memento,
+    private readonly tree: ResultsTree,
+    private readonly treeView: vscode.TreeView<unknown>,
+    private readonly log: vscode.LogOutputChannel,
+  ) {
+    this.form = { ...EMPTY_FORM, ...state.get<Partial<QueryForm>>(FORM_KEY) };
+    this.history = state.get<string[]>(HISTORY_KEY, []);
+    void this.setContext();
+  }
+
+  dispose(): void {
+    this.abort?.abort();
+  }
+
+  currentForm(): QueryForm {
+    return this.form;
+  }
+
+  currentStatus(): SearchStatus {
+    return this.status;
+  }
+
+  hiddenLineReport(): readonly string[] {
+    return this.report;
+  }
+
+  viewState() {
+    return { form: this.form, history: this.history, config: settings.viewConfig(), status: this.status };
+  }
+
+  onSearch(form: QueryForm, commit: boolean): void {
+    void this.search(form, commit);
+  }
+
+  onFormChanged(form: QueryForm): void {
+    this.setForm(form, false);
+  }
+
+  onCancel(): void {
+    this.abort?.abort();
+  }
+
+  onCommand(command: StatusCommand): void {
+    switch (command) {
+      case "showHiddenLines":
+        void this.showHiddenLines();
+        break;
+      case "openExcludeSettings":
+        void vscode.commands.executeCommand("workbench.action.openSettings", "search.exclude");
+        break;
+      case "openMaxResultsSetting":
+        void vscode.commands.executeCommand("workbench.action.openSettings", "search.maxResults");
+        break;
+      case "openRipgrepSetting":
+        void vscode.commands.executeCommand("workbench.action.openSettings", "codeonly.ripgrepPath");
+        break;
+      case "showLog":
+        this.log.show(true);
+        break;
+      case "focusResults":
+        void vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
+        break;
+    }
+  }
+
+  /** Runs `form`, replacing any running search. Resolves undefined unless the search ran to completion. */
+  async search(form: QueryForm, commit: boolean, notifyView = false): Promise<SearchSummary | undefined> {
+    this.setForm(form, notifyView);
+    if (commit) {
+      this.remember(form.pattern);
+    }
+    this.abort?.abort();
+    this.abort = undefined;
+    const id = ++this.runId;
+
+    if (!form.pattern) {
+      this.report = [];
+      this.tree.reset([]);
+      this.setStatus({ kind: "idle" });
+      return undefined;
+    }
+
+    const folders = (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
+    if (folders.length === 0) {
+      this.fail("Open a folder to search its code.");
+      return undefined;
+    }
+
+    const rgPath = await this.findRipgrep();
+    if (id !== this.runId) {
+      return undefined;
+    }
+    if (!rgPath) {
+      const configured = settings.ripgrepPath();
+      this.fail(
+        configured
+          ? `ripgrep is not executable at "${configured}".`
+          : "ripgrep was not found in this VS Code installation or on PATH.",
+        "openRipgrepSetting",
+      );
+      return undefined;
+    }
+
+    const abort = new AbortController();
+    this.abort = abort;
+    const logHidden = settings.logExcludedLines();
+    const hidden: HiddenLine[] = [];
+    const multiRoot = folders.length > 1;
+    const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
+    const folderNames = new Set(names.values());
+    const includes = splitGlobList(form.includes);
+    const excludes = splitGlobList(form.excludes);
+    const targets: SearchTarget[] = [];
+    for (const folder of folders) {
+      const scoped = multiRoot ? scopeIncludes(includes, folder.name, folderNames) : includes;
+      if (scoped) {
+        targets.push({
+          folder: { path: folder.uri.fsPath, options: settings.folderOptions(folder.uri) },
+          query: {
+            pattern: form.pattern,
+            isRegExp: form.isRegExp,
+            isCaseSensitive: form.isCaseSensitive,
+            isWordMatch: form.isWordMatch,
+            includes: scoped,
+            excludes,
+          },
+        });
+      }
+    }
+
+    this.tree.reset(folders);
+    this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
+    void vscode.commands.executeCommand("setContext", "codeonly.searching", true);
+    const progress = setInterval(() => {
+      if (id === this.runId) {
+        this.setStatus({ kind: "searching", ...this.tree.counts() });
+      }
+    }, PROGRESS_INTERVAL_MS);
+
+    const onResult = (result: FileResult) => {
+      if (id !== this.runId) {
+        return;
+      }
+      this.tree.add(result);
+      if (logHidden) {
+        const location = multiRoot ? `${names.get(result.folder)}/${result.relativePath}` : result.relativePath;
+        for (const e of result.excluded) {
+          hidden.push({ location, lineNumber: e.lineNumber, reason: e.reason, text: e.text });
+        }
+      }
+    };
+
+    try {
+      const maxResults = settings.maxResults();
+      const summary = await vscode.window.withProgress({ location: { viewId: RESULTS_VIEW_ID } }, () =>
+        searchTargets(rgPath, targets, maxResults, abort.signal, onResult),
+      );
+      if (id !== this.runId) {
+        return undefined;
+      }
+      this.tree.refresh();
+      const counts = this.tree.counts();
+      this.setStatus({
+        kind: "done",
+        matchCount: summary.matchCount,
+        fileCount: summary.fileCount,
+        hiddenLineCount: summary.excludedLineCount,
+        unfilteredFileCount: counts.unfilteredFileCount,
+        limitHit: summary.limitHit,
+        maxResults,
+        durationMs: summary.durationMs,
+        warningCount: summary.warnings.length,
+        cancelled: summary.cancelled,
+      });
+      this.writeLog(form, summary, logHidden ? hidden : undefined);
+      return summary.cancelled ? undefined : summary;
+    } catch (e) {
+      if (id !== this.runId) {
+        return undefined;
+      }
+      this.ripgrep = undefined;
+      this.tree.reset([]);
+      const message = e instanceof Error ? e.message : String(e);
+      if (e instanceof SearchError) {
+        this.fail(message);
+        this.log.warn(`Search for "${form.pattern}" failed: ${e.detail ?? message}`);
+      } else {
+        this.fail(`Search failed: ${message}`, "showLog");
+        this.log.error(e instanceof Error ? e : message);
+      }
+      return undefined;
+    } finally {
+      clearInterval(progress);
+      if (id === this.runId) {
+        this.abort = undefined;
+        void vscode.commands.executeCommand("setContext", "codeonly.searching", false);
+      }
+    }
+  }
+
+  /** Re-runs the current query. */
+  rerun(): Promise<SearchSummary | undefined> {
+    return this.search(this.form, false);
+  }
+
+  clear(): void {
+    this.abort?.abort();
+    this.runId++;
+    this.report = [];
+    this.tree.reset([]);
+    this.setForm({ ...this.form, pattern: "" }, true);
+    this.setStatus({ kind: "idle" });
+  }
+
+  /** Called after the tree changed outside a search, e.g. a dismissed result. */
+  resultsChanged(): void {
+    if (this.status.kind === "done") {
+      this.setStatus({ ...this.status, ...this.tree.counts() });
+    } else {
+      void this.setContext();
+    }
+  }
+
+  /** Reveals the query view with its input focused, seeded from the active editor. */
+  async focusSearch(): Promise<void> {
+    const seed = seedFromEditor(this.form.isRegExp);
+    if (seed !== undefined) {
+      this.setForm({ ...this.form, pattern: seed }, true);
+    }
+    await vscode.commands.executeCommand("codeonly.query.focus");
+    this.view?.focusInput();
+  }
+
+  async findInFolder(uri: vscode.Uri): Promise<void> {
+    const folder = vscode.workspace.getWorkspaceFolder(uri);
+    if (!folder) {
+      void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
+      return;
+    }
+    const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
+    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const scope = [multiRoot ? folder.name : undefined, rel || undefined].filter(Boolean).join("/");
+    this.setForm({ ...this.form, includes: scope ? `./${scope}` : "", showDetails: true }, true);
+    await vscode.commands.executeCommand("codeonly.query.focus");
+    this.view?.focusInput();
+    if (this.form.pattern) {
+      void this.search(this.form, false);
+    }
+  }
+
+  remember(pattern: string): void {
+    if (!pattern) {
+      return;
+    }
+    this.history = [...this.history.filter((h) => h !== pattern), pattern].slice(-HISTORY_LIMIT);
+    void this.state.update(HISTORY_KEY, this.history);
+    this.view?.post({ type: "history", history: this.history });
+  }
+
+  configChanged(): void {
+    this.view?.post({ type: "config", config: settings.viewConfig() });
+  }
+
+  private setForm(form: QueryForm, notifyView: boolean): void {
+    this.form = form;
+    void this.state.update(FORM_KEY, form);
+    if (notifyView) {
+      this.view?.post({ type: "form", form, focus: false });
+    }
+  }
+
+  private setStatus(status: SearchStatus): void {
+    this.status = status;
+    this.view?.post({ type: "status", status });
+    this.updateTreeView();
+    void this.setContext();
+  }
+
+  private fail(message: string, action?: StatusCommand): void {
+    this.setStatus({ kind: "error", message, action });
+  }
+
+  private updateTreeView(): void {
+    const s = this.status;
+    const view = this.treeView;
+    switch (s.kind) {
+      case "idle":
+        view.message = undefined;
+        view.description = undefined;
+        break;
+      case "searching":
+        view.message = s.matchCount === 0 ? "Searching…" : undefined;
+        view.description = undefined;
+        break;
+      case "done":
+        view.message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;
+        view.description =
+          s.matchCount === 0
+            ? undefined
+            : `${s.matchCount.toLocaleString()} result${s.matchCount === 1 ? "" : "s"}` +
+              (s.hiddenLineCount > 0 ? ` · ${s.hiddenLineCount.toLocaleString()} hidden` : "");
+        break;
+      case "error":
+        view.message = s.message;
+        view.description = undefined;
+        break;
+    }
+  }
+
+  private async setContext(): Promise<void> {
+    await vscode.commands.executeCommand("setContext", "codeonly.hasResults", !this.tree.isEmpty);
+    await vscode.commands.executeCommand("setContext", "codeonly.state", this.status.kind);
+  }
+
+  private async findRipgrep(): Promise<string | undefined> {
+    const configured = settings.ripgrepPath();
+    if (this.ripgrep?.configured === configured) {
+      return this.ripgrep.path;
+    }
+    const found = await locateRipgrep(vscode.env.appRoot, configured || undefined);
+    if (found) {
+      this.ripgrep = { configured, path: found };
+      this.log.info(`Using ripgrep at ${found}`);
+    }
+    return found;
+  }
+
+  private writeLog(form: QueryForm, summary: SearchSummary, hidden: HiddenLine[] | undefined): void {
+    const flags = [form.isCaseSensitive && "case", form.isWordMatch && "word", form.isRegExp && "regex"].filter(Boolean);
+    const scope = [form.includes && `include: ${form.includes}`, form.excludes && `exclude: ${form.excludes}`].filter(Boolean);
+    this.log.info(
+      `Searched "${form.pattern}"${flags.length ? ` [${flags.join(", ")}]` : ""}${scope.length ? ` (${scope.join("; ")})` : ""}: ` +
+        `${summary.matchCount} results in ${summary.fileCount} files, ${summary.excludedLineCount} lines hidden, ` +
+        `${(summary.durationMs / 1000).toFixed(2)} s${summary.limitHit ? ", result limit hit" : ""}${summary.cancelled ? ", stopped" : ""}`,
+    );
+    for (const w of summary.warnings) {
+      this.log.warn(w);
+    }
+    if (!hidden) {
+      this.report = [];
+      return;
+    }
+    hidden.sort((a, b) => a.location.localeCompare(b.location) || a.lineNumber - b.lineNumber);
+    this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${h.text.trim()}`);
+    this.log.info(`Hidden lines for "${form.pattern}" (${hidden.length}):`);
+    for (const line of this.report) {
+      this.log.info(`  ${line}`);
+    }
+  }
+
+  private async showHiddenLines(): Promise<void> {
+    if (settings.logExcludedLines()) {
+      this.log.show(true);
+      return;
+    }
+    const enable = "Enable and Search Again";
+    const choice = await vscode.window.showInformationMessage(
+      "Hidden lines are written to the CodeOnly output only while 'codeonly.diagnostics.logExcludedLines' is on.",
+      enable,
+    );
+    if (choice === enable) {
+      await vscode.workspace
+        .getConfiguration("codeonly")
+        .update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
+      await this.rerun();
+      this.log.show(true);
+    }
+  }
+}
+
+interface SearchTarget {
+  readonly folder: SearchFolder;
+  readonly query: SearchQuery;
+}
+
+/** Folders are searched one by one because multi-root include scoping gives each its own query. */
+async function searchTargets(
+  rgPath: string,
+  targets: readonly SearchTarget[],
+  maxResults: number | undefined,
+  signal: AbortSignal,
+  onResult: (result: FileResult) => void,
+): Promise<SearchSummary> {
+  let total: SearchSummary | undefined;
+  for (const { folder, query } of targets) {
+    const remaining = maxResults === undefined ? undefined : maxResults - (total?.matchCount ?? 0);
+    const summary = await searchCode({
+      rgPath,
+      query,
+      folders: [folder],
+      maxResults: remaining,
+      signal,
+      onResult,
+    });
+    total = total ? merge(total, summary) : summary;
+    if (summary.limitHit || summary.cancelled) {
+      break;
+    }
+  }
+  return (
+    total ?? {
+      fileCount: 0,
+      lineCount: 0,
+      matchCount: 0,
+      excludedLineCount: 0,
+      limitHit: false,
+      cancelled: signal.aborted,
+      durationMs: 0,
+      warnings: [],
+    }
+  );
+}
+
+function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
+  return {
+    fileCount: a.fileCount + b.fileCount,
+    lineCount: a.lineCount + b.lineCount,
+    matchCount: a.matchCount + b.matchCount,
+    excludedLineCount: a.excludedLineCount + b.excludedLineCount,
+    limitHit: a.limitHit || b.limitHit,
+    cancelled: a.cancelled || b.cancelled,
+    durationMs: a.durationMs + b.durationMs,
+    warnings: [...a.warnings, ...b.warnings],
+  };
+}
+
+function seedFromEditor(isRegExp: boolean): string | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return undefined;
+  }
+  const { document, selection } = editor;
+  let text: string | undefined;
+  if (!selection.isEmpty) {
+    text = selection.isSingleLine ? document.getText(selection) : undefined;
+  } else {
+    const word = document.getWordRangeAtPosition(selection.active);
+    text = word ? document.getText(word) : undefined;
+  }
+  if (!text) {
+    return undefined;
+  }
+  return isRegExp ? text.replace(/[\\{}*+?|^$.[\]()]/g, "\\$&") : text;
+}

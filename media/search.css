@@ -1,0 +1,188 @@
+:root {
+  --gutter: 12px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  background: transparent;
+}
+
+/* Column 2 holds the details toggle beside the search field; the detail fields align with column 1. */
+.query {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 2px;
+  row-gap: 4px;
+  padding: 6px 6px 6px var(--gutter);
+}
+
+#patternField,
+.details {
+  grid-column: 1;
+}
+
+#details {
+  grid-column: 2;
+  align-self: center;
+}
+
+.status {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  box-sizing: border-box;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+}
+
+.field:focus-within {
+  border-color: var(--vscode-focusBorder);
+}
+
+.field.error {
+  border-color: var(--vscode-inputValidation-errorBorder);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.toggles {
+  display: flex;
+  gap: 1px;
+  padding-right: 2px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-input-foreground);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--vscode-inputOption-hoverBackground);
+}
+
+.toggle[aria-checked="true"] {
+  background: var(--vscode-inputOption-activeBackground);
+  border-color: var(--vscode-inputOption-activeBorder);
+  color: var(--vscode-inputOption-activeForeground);
+}
+
+.toggle:focus-visible,
+.icon-button:focus-visible,
+.status a:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.glyph {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: -0.3px;
+}
+
+.glyph-word {
+  padding: 0 1px 1px;
+  border-bottom: 1px solid currentColor;
+}
+
+.glyph-regex {
+  font-weight: 600;
+}
+
+.icon-button {
+  width: 20px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  font: inherit;
+  font-size: 13px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.icon-button[aria-expanded="true"] {
+  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.details[hidden] {
+  display: none;
+}
+
+.prefix {
+  flex: none;
+  min-width: 46px;
+  padding-left: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  user-select: none;
+}
+
+.status {
+  min-height: 18px;
+  line-height: 18px;
+  color: var(--vscode-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.status.error {
+  color: var(--vscode-errorForeground);
+}
+
+.status a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.status a:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}

@@ -190,6 +190,19 @@ interface RgMessage {
 
 const STDERR_LIMIT = 64 * 1024;
 
+/** Reduces ripgrep's stderr to one user-facing sentence. */
+export function summarizeRipgrepError(stderr: string): string {
+  if (/regex parse error/.test(stderr)) {
+    const reason = /^error: (.+)$/m.exec(stderr)?.[1];
+    return reason ? `Invalid regular expression: ${reason}` : "Invalid regular expression.";
+  }
+  if (/the literal "\\n" is not allowed/.test(stderr)) {
+    return "Multi-line patterns are not supported.";
+  }
+  const first = stderr.split("\n").find((l) => l.trim()) ?? "";
+  return first.replace(/^rg: /, "").trim() || "ripgrep failed.";
+}
+
 /**
  * Runs ripgrep with `--json` output and calls `onFile` once per file with matches, in output order.
  * `onFile` is awaited before more output is read. Aborting kills the process and resolves normally.

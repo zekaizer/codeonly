@@ -169,8 +169,23 @@ suite("code search pipeline", () => {
     assert.deepEqual(filesWithLines(await search("widget", { isWordMatch: true })), []);
   });
 
-  test("invalid regular expression is reported", async () => {
-    await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => e instanceof SearchError && /regex/i.test(e.message));
+  test("invalid regular expression is reported briefly, with ripgrep's text as detail", async () => {
+    await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => {
+      assert.ok(e instanceof SearchError);
+      assert.equal(e.message, "Invalid regular expression: unclosed group");
+      assert.match(e.detail ?? "", /regex parse error/);
+      return true;
+    });
+  });
+
+  test("a newline in a regular expression is reported as unsupported", async () => {
+    await assert.rejects(search("a\\nb", { isRegExp: true }), (e: unknown) => {
+      assert.ok(e instanceof SearchError);
+      assert.equal(e.message, "Multi-line patterns are not supported.");
+      return true;
+    });
+    const escaped = await search("widget\\\\n", { isRegExp: true });
+    assert.equal(escaped.summary.matchCount, 0);
   });
 
   test("an aborted search reports cancellation", async () => {

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { type FolderOptions, type SearchQuery, splitGlobList } from "../search/query";
+import { type FolderOptions, type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
 import { buildRipgrepArgs, locateRipgrep, ripgrepCandidates } from "../search/ripgrep";
 
 const folder: FolderOptions = {
@@ -156,5 +156,26 @@ suite("ripgrep location", () => {
       process.env.PATH = saved;
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+suite("multi-root include scoping", () => {
+  const names = new Set(["a", "b"]);
+
+  test("folder-prefixed globs apply to their folder only", () => {
+    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "a", names), ["./src", "*.c"]);
+    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "b", names), ["*.c"]);
+  });
+
+  test("a folder targeted only elsewhere is skipped", () => {
+    assert.equal(scopeIncludes(["./a/src"], "b", names), undefined);
+  });
+
+  test("a bare folder prefix includes the whole folder", () => {
+    assert.deepEqual(scopeIncludes(["./a", "./b/x"], "a", names), []);
+  });
+
+  test("relative globs that do not name a folder are kept", () => {
+    assert.deepEqual(scopeIncludes(["./src"], "a", names), ["./src"]);
   });
 });

@@ -20,24 +20,39 @@ const problemMatcherPlugin = {
   },
 };
 
-const ctx = await esbuild.context({
-  entryPoints: ["src/extension.ts"],
+const common = {
   bundle: true,
-  format: "cjs",
-  platform: "node",
-  target: "node22",
-  outfile: "dist/extension.js",
-  external: ["vscode"],
   minify: production,
   sourcemap: !production,
   sourcesContent: false,
   logLevel: "silent",
   plugins: [problemMatcherPlugin],
-});
+};
+
+const contexts = await Promise.all([
+  esbuild.context({
+    ...common,
+    entryPoints: ["src/extension.ts"],
+    format: "cjs",
+    platform: "node",
+    target: "node22",
+    outfile: "dist/extension.js",
+    external: ["vscode"],
+  }),
+  // Query view script, loaded by the webview.
+  esbuild.context({
+    ...common,
+    entryPoints: ["src/webview/main.ts"],
+    format: "iife",
+    platform: "browser",
+    target: "es2022",
+    outfile: "dist/webview/search.js",
+  }),
+]);
 
 if (watch) {
-  await ctx.watch();
+  await Promise.all(contexts.map((ctx) => ctx.watch()));
 } else {
-  await ctx.rebuild();
-  await ctx.dispose();
+  await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+  await Promise.all(contexts.map((ctx) => ctx.dispose()));
 }

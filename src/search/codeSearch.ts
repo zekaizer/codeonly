@@ -4,7 +4,7 @@ import { isCFamilyFile } from "../classify/cFamily";
 import { classifyRange, scanRegions } from "../classify/cLexer";
 import { REASON_COMMENT_ONLY, decideLine } from "../classify/lineDecision";
 import type { FolderOptions, SearchQuery } from "./query";
-import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, runRipgrep } from "./ripgrep";
+import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, runRipgrep, summarizeRipgrepError } from "./ripgrep";
 
 /** UTF-16 column range within {@link ResultLine.text}. */
 export interface ColumnRange {
@@ -69,7 +69,15 @@ export interface SearchSummary {
 }
 
 /** The search could not run, e.g. an invalid regular expression. The message is user-facing. */
-export class SearchError extends Error {}
+export class SearchError extends Error {
+  constructor(
+    message: string,
+    /** Diagnostic text for the log, e.g. ripgrep's stderr. */
+    readonly detail?: string,
+  ) {
+    super(message);
+  }
+}
 
 const FILE_CONCURRENCY = 16;
 const UNREADABLE = "unclassifiable: cannot read file";
@@ -85,6 +93,10 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   signal?.addEventListener("abort", forwardAbort);
   if (signal?.aborted) {
     stop.abort();
+  }
+
+  if (request.query.isRegExp && hasNewlineEscape(request.query.pattern)) {
+    throw new SearchError("Multi-line patterns are not supported.");
   }
 
   let fileCount = 0;
@@ -139,11 +151,11 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
       );
       await Promise.all(pending);
       if (!exit.aborted && exit.code !== 0 && exit.code !== 1) {
-        const message = exit.stderr.trim() || `ripgrep exited with code ${exit.code}`;
+        const detail = exit.stderr.trim() || `ripgrep exited with code ${exit.code}`;
         if (!sawFile) {
-          throw new SearchError(message);
+          throw new SearchError(summarizeRipgrepError(detail), detail);
         }
-        warnings.push(message);
+        warnings.push(detail);
       }
     }
   } catch (e) {
@@ -165,6 +177,22 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
     durationMs: performance.now() - started,
     warnings,
   };
+}
+
+/** Results are per line, so a pattern that can only match across lines would silently find nothing. */
+function hasNewlineEscape(pattern: string): boolean {
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === "\n") {
+      return true;
+    }
+    if (pattern[i] === "\\") {
+      if (pattern[i + 1] === "n") {
+        return true;
+      }
+      i++;
+    }
+  }
+  return false;
 }
 
 function countMatches(lines: readonly ResultLine[]): number {

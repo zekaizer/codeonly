@@ -1,6 +1,6 @@
 {
   "name": "codeonly",
-  "displayName": "codeonly",
+  "displayName": "CodeOnly Search",
   "description": "Workspace search that shows only code matches, excluding comment-only lines.",
   "version": "0.0.1",
   "publisher": "zekaizer",
@@ -21,13 +21,277 @@
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
-  "contributes": {},
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeonly",
+          "title": "CodeOnly Search",
+          "icon": "media/codeonly.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeonly": [
+        {
+          "type": "webview",
+          "id": "codeonly.query",
+          "name": "Search",
+          "initialSize": 1
+        },
+        {
+          "id": "codeonly.results",
+          "name": "Results",
+          "initialSize": 4
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codeonly.results",
+        "when": "codeonly.state == idle || !codeonly.state",
+        "contents": "Search the workspace without matches that are only inside comments.\n[Search Code](command:codeonly.focusSearch)\nLines are hidden when every match on them is inside a C comment. Files outside the C family are listed unfiltered."
+      }
+    ],
+    "commands": [
+      {
+        "command": "codeonly.focusSearch",
+        "title": "Search Code (Exclude Comments)",
+        "category": "CodeOnly",
+        "icon": "$(search)"
+      },
+      {
+        "command": "codeonly.findInFolder",
+        "title": "Find Code in Folder (Exclude Comments)...",
+        "category": "CodeOnly"
+      },
+      {
+        "command": "codeonly.rerun",
+        "title": "Search Again",
+        "category": "CodeOnly",
+        "icon": "$(refresh)",
+        "enablement": "codeonly.state != idle"
+      },
+      {
+        "command": "codeonly.cancel",
+        "title": "Stop Search",
+        "category": "CodeOnly",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "codeonly.clear",
+        "title": "Clear Search Results",
+        "category": "CodeOnly",
+        "icon": "$(clear-all)",
+        "enablement": "codeonly.state != idle"
+      },
+      {
+        "command": "codeonly.expandAll",
+        "title": "Expand All",
+        "category": "CodeOnly",
+        "icon": "$(expand-all)",
+        "enablement": "codeonly.hasResults"
+      },
+      {
+        "command": "codeonly.nextResult",
+        "title": "Go to Next Result",
+        "category": "CodeOnly",
+        "enablement": "codeonly.hasResults"
+      },
+      {
+        "command": "codeonly.previousResult",
+        "title": "Go to Previous Result",
+        "category": "CodeOnly",
+        "enablement": "codeonly.hasResults"
+      },
+      {
+        "command": "codeonly.showLog",
+        "title": "Show Log",
+        "category": "CodeOnly",
+        "icon": "$(output)"
+      },
+      {
+        "command": "codeonly.openResult",
+        "title": "Open Result",
+        "category": "CodeOnly"
+      },
+      {
+        "command": "codeonly.openToSide",
+        "title": "Open to the Side",
+        "category": "CodeOnly"
+      },
+      {
+        "command": "codeonly.dismiss",
+        "title": "Dismiss",
+        "category": "CodeOnly",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codeonly.copy",
+        "title": "Copy",
+        "category": "CodeOnly"
+      },
+      {
+        "command": "codeonly.copyPath",
+        "title": "Copy Path",
+        "category": "CodeOnly"
+      },
+      {
+        "command": "codeonly.copyRelativePath",
+        "title": "Copy Relative Path",
+        "category": "CodeOnly"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codeonly.rerun",
+          "when": "view == codeonly.results && !codeonly.searching",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeonly.cancel",
+          "when": "view == codeonly.results && codeonly.searching",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeonly.clear",
+          "when": "view == codeonly.results",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeonly.expandAll",
+          "when": "view == codeonly.results",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeonly.showLog",
+          "when": "view == codeonly.results",
+          "group": "z_log"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codeonly.dismiss",
+          "when": "view == codeonly.results",
+          "group": "inline"
+        },
+        {
+          "command": "codeonly.openToSide",
+          "when": "view == codeonly.results",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeonly.copy",
+          "when": "view == codeonly.results",
+          "group": "9_cutcopypaste@1"
+        },
+        {
+          "command": "codeonly.copyPath",
+          "when": "view == codeonly.results",
+          "group": "9_cutcopypaste@2"
+        },
+        {
+          "command": "codeonly.copyRelativePath",
+          "when": "view == codeonly.results",
+          "group": "9_cutcopypaste@3"
+        },
+        {
+          "command": "codeonly.dismiss",
+          "when": "view == codeonly.results",
+          "group": "z_dismiss"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "codeonly.findInFolder",
+          "when": "explorerResourceIsFolder",
+          "group": "4_search@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codeonly.findInFolder",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.openResult",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.openToSide",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.dismiss",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.copy",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.copyRelativePath",
+          "when": "false"
+        },
+        {
+          "command": "codeonly.cancel",
+          "when": "codeonly.searching"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "codeonly.focusSearch",
+        "key": "ctrl+shift+alt+f",
+        "mac": "cmd+shift+alt+f"
+      },
+      {
+        "command": "codeonly.openToSide",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "focusedView == codeonly.results"
+      },
+      {
+        "command": "codeonly.dismiss",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == codeonly.results"
+      },
+      {
+        "command": "codeonly.copy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == codeonly.results"
+      }
+    ],
+    "configuration": {
+      "title": "CodeOnly Search",
+      "properties": {
+        "codeonly.ripgrepPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `rg` executable. Leave empty to use the ripgrep bundled with VS Code, falling back to `rg` on `PATH`."
+        },
+        "codeonly.diagnostics.logExcludedLines": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Write every hidden result line, with the reason it was hidden, to the **CodeOnly** output channel."
+        }
+      }
+    }
+  },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "npm run check-types && npm run lint && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "package": "npm run check-types && npm run lint && node esbuild.mjs --production",
-    "check-types": "tsc --noEmit",
+    "check-types": "tsc --noEmit && tsc --noEmit -p src/webview",
     "compile-tests": "tsc -p . --outDir out",
     "lint": "eslint src",
     "pretest": "npm run compile-tests && npm run compile",
@@ -43,5 +307,21 @@
     "eslint": "^10.10.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0"
+  },
+  "keywords": [
+    "search",
+    "comments",
+    "c",
+    "kernel",
+    "ripgrep"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
   }
 }

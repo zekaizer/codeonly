@@ -1,7 +1,126 @@
 import * as vscode from "vscode";
+import type { CodeOnlyApi, ResultEntry } from "./api";
+import { MatchHighlights } from "./ui/matchHighlights";
+import { QUERY_VIEW_ID, QueryViewProvider } from "./ui/queryView";
+import { type OpenResultArgs, type ResultNode, ResultsTree, isResultNode, openArgs } from "./ui/resultsTree";
+import { RESULTS_VIEW_ID, SearchController } from "./ui/searchController";
+import * as settings from "./ui/settings";
 
-export function activate(_context: vscode.ExtensionContext): void {
-  // Intentionally empty: features are added in later commits.
+export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
+  const log = vscode.window.createOutputChannel("CodeOnly", { log: true });
+  const tree = new ResultsTree(settings.collapseMode);
+  const treeView = vscode.window.createTreeView<ResultNode>(RESULTS_VIEW_ID, {
+    treeDataProvider: tree,
+    showCollapseAll: true,
+  });
+  const highlights = new MatchHighlights(tree, () => treeView.visible);
+  const controller = new SearchController(context.workspaceState, tree, treeView, log);
+  const queryView = new QueryViewProvider(context.extensionUri, controller);
+  controller.view = queryView;
+
+  const target = (node: unknown): ResultNode | undefined =>
+    isResultNode(node) ? node : treeView.selection[0];
+
+  const open = async (args: OpenResultArgs, sideBySide = false) => {
+    const line = args.line - 1;
+    await vscode.window.showTextDocument(vscode.Uri.file(args.path), {
+      selection: new vscode.Range(line, args.start, line, args.end),
+      preview: !sideBySide,
+      preserveFocus: !sideBySide,
+      viewColumn: sideBySide ? vscode.ViewColumn.Beside : undefined,
+    });
+    controller.remember(controller.currentForm().pattern);
+  };
+
+  const step = async (direction: 1 | -1) => {
+    const next = tree.neighbor(treeView.selection[0], direction);
+    if (next) {
+      await treeView.reveal(next, { select: true, focus: false });
+      await open(openArgs(next));
+    }
+  };
+
+  const copy = async (text: string | undefined) => {
+    if (text !== undefined) {
+      await vscode.env.clipboard.writeText(text);
+    }
+  };
+
+  context.subscriptions.push(
+    log,
+    tree,
+    treeView,
+    highlights,
+    controller,
+    treeView.onDidChangeVisibility(() => highlights.update()),
+    vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
+    vscode.commands.registerCommand("codeonly.focusSearch", () => controller.focusSearch()),
+    vscode.commands.registerCommand("codeonly.findInFolder", (uri?: vscode.Uri) => {
+      const folder = uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+      return folder ? controller.findInFolder(folder) : undefined;
+    }),
+    vscode.commands.registerCommand("codeonly.rerun", () => controller.rerun()),
+    vscode.commands.registerCommand("codeonly.cancel", () => controller.onCancel()),
+    vscode.commands.registerCommand("codeonly.clear", () => controller.clear()),
+    vscode.commands.registerCommand("codeonly.expandAll", () => tree.expandAllFiles()),
+    vscode.commands.registerCommand("codeonly.showLog", () => log.show(true)),
+    vscode.commands.registerCommand("codeonly.nextResult", () => step(1)),
+    vscode.commands.registerCommand("codeonly.previousResult", () => step(-1)),
+    vscode.commands.registerCommand("codeonly.openResult", (args: OpenResultArgs) => open(args)),
+    vscode.commands.registerCommand("codeonly.openToSide", (node?: unknown) => {
+      const n = target(node);
+      if (n?.kind === "line") {
+        return open(openArgs(n), true);
+      }
+      if (n?.kind === "file") {
+        return open({ path: n.result.absolutePath, line: 1, start: 0, end: 0 }, true);
+      }
+      return undefined;
+    }),
+    vscode.commands.registerCommand("codeonly.dismiss", (node?: unknown) => {
+      const n = target(node);
+      if (n) {
+        tree.dismiss(n);
+        controller.resultsChanged();
+      }
+    }),
+    vscode.commands.registerCommand("codeonly.copy", (node?: unknown) => {
+      const n = target(node);
+      return copy(n?.kind === "line" ? n.line.text : n?.result.absolutePath);
+    }),
+    vscode.commands.registerCommand("codeonly.copyPath", (node?: unknown) => {
+      const n = target(node);
+      return copy(n && (n.kind === "line" ? n.file : n).result.absolutePath);
+    }),
+    vscode.commands.registerCommand("codeonly.copyRelativePath", (node?: unknown) => {
+      const n = target(node);
+      return copy(n && (n.kind === "line" ? n.file : n).result.relativePath);
+    }),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("search.searchOnType") || e.affectsConfiguration("search.searchOnTypeDebouncePeriod")) {
+        controller.configChanged();
+      }
+      if (e.affectsConfiguration("search.collapseResults")) {
+        tree.refresh();
+      }
+    }),
+  );
+
+  const entry = (node: ResultNode): ResultEntry => ({
+    node,
+    item: tree.getTreeItem(node),
+    children: tree.getChildren(node).map(entry),
+  });
+
+  return {
+    search: (form) => controller.search({ ...controller.currentForm(), ...form }, false, true),
+    form: () => controller.currentForm(),
+    status: () => controller.currentStatus(),
+    resultTree: async () => tree.getChildren().map(entry),
+    hiddenLineReport: () => controller.hiddenLineReport(),
+    highlightedRanges: (uri) => highlights.rangesFor(uri),
+    queryViewReady: () => queryView.whenReady(),
+  };
 }
 
 export function deactivate(): void {}
