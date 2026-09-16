@@ -78,6 +78,8 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   private generation = 0;
   private expandAll = false;
   private refreshTimer: NodeJS.Timeout | undefined;
+  private pingTimer: NodeJS.Timeout | undefined;
+  private pingsOutstanding = 0;
   /** Results added since the last refresh. */
   private pending = false;
   /** A refresh was pushed and the view has not read the tree since. */
@@ -89,10 +91,18 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   private shown = new Set<FileNode>();
   private shownAny = false;
 
-  constructor(private readonly collapseMode: () => CollapseMode) {}
+  /**
+   * @param ping A round trip to the window, which answers only after it has processed the tree
+   *   it read before.
+   */
+  constructor(
+    private readonly collapseMode: () => CollapseMode,
+    private readonly ping: () => Thenable<unknown> = () => Promise.resolve(),
+  ) {}
 
   dispose(): void {
     clearTimeout(this.refreshTimer);
+    clearTimeout(this.pingTimer);
     this.changed.dispose();
     this.resetEmitter.dispose();
   }
@@ -182,12 +192,15 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   }
 
   private schedule(): void {
-    if (!this.pending || this.awaitingRead || this.refreshTimer) {
+    if (!this.pending || this.refreshTimer || this.waitingForView()) {
       return;
     }
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      // The view may have read more of the tree since this was scheduled.
+      // A busy view schedules this again when it answers its ping.
+      if (this.waitingForView()) {
+        return;
+      }
       if (Date.now() >= this.nextRefreshAt()) {
         this.refresh();
       } else {
@@ -196,9 +209,14 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     }, this.nextRefreshAt() - Date.now());
   }
 
+  private waitingForView(): boolean {
+    return this.awaitingRead || this.pingTimer !== undefined || this.pingsOutstanding > 0;
+  }
+
   /**
-   * The view reads the root, then the items and children of expanded files, so the time from the
-   * root read to the last read is what a refresh costs. Waiting for a hidden view is not counted.
+   * The view reads the root, then the items and children of expanded files, and then draws them,
+   * so the time from the root read to the answer to the last ping is what a refresh costs.
+   * Waiting for a hidden view is not counted.
    */
   private nextRefreshAt(): number {
     const took = this.lastReadAt - this.rootReadAt;
@@ -273,9 +291,24 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return lines[lines.indexOf(own[own.length - 1]) + 1] ?? lines[first - 1];
   }
 
+  private noteRead(): void {
+    this.lastReadAt = Date.now();
+    // Reads come in bursts; one ping after each burst.
+    this.pingTimer ??= setTimeout(() => {
+      this.pingTimer = undefined;
+      this.pingsOutstanding++;
+      const answered = () => {
+        this.pingsOutstanding--;
+        this.lastReadAt = Date.now();
+        this.schedule();
+      };
+      Promise.resolve(this.ping()).then(answered, answered);
+    }, 0);
+  }
+
   /** Called by the view; each call counts as a read (see {@link nextRefreshAt}). */
   getChildren(node?: ResultNode): ResultNode[] {
-    this.lastReadAt = Date.now();
+    this.noteRead();
     if (!node) {
       this.awaitingRead = false;
       this.rootReadAt = this.lastReadAt;
@@ -293,7 +326,7 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
 
   /** Called by the view; each call counts as a read. */
   getTreeItem(node: ResultNode): vscode.TreeItem {
-    this.lastReadAt = Date.now();
+    this.noteRead();
     return node.kind === "file" ? this.fileItem(node) : this.lineItem(node);
   }
 

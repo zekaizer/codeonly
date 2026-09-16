@@ -128,6 +128,33 @@ suite("results tree pacing", () => {
     assert.ok(stamps[1] - lastRead >= 950, `${stamps[1] - lastRead} ms after the last read`);
   });
 
+  test("the pause also covers the time the view takes to process what it read", async () => {
+    let answered = 0;
+    const slow = new ResultsTree(
+      () => "alwaysExpand",
+      () => new Promise((resolve) => setTimeout(() => resolve((answered = Date.now())), 500)),
+    );
+    const slowStamps: number[] = [];
+    const slowSub = slow.onDidChangeTreeData(() => slowStamps.push(Date.now()));
+    try {
+      slow.add(fileResult(0));
+      await sleep(350);
+      assert.equal(slowStamps.length, 1);
+      const read = Date.now();
+      slow.getChildren();
+      for (let i = 1; Date.now() - read < 2000; i++) {
+        slow.add(fileResult(i));
+        await sleep(20);
+      }
+      assert.ok(answered > 0);
+      assert.equal(slowStamps.length, 2);
+      assert.ok(slowStamps[1] - answered >= 950, `${slowStamps[1] - answered} ms after the view answered`);
+    } finally {
+      slowSub.dispose();
+      slow.dispose();
+    }
+  });
+
   test("flush pushes pending results at once, and nothing when none are pending", () => {
     tree.add(fileResult(0));
     tree.flush();

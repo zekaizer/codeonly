@@ -17,7 +17,10 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const log = vscode.window.createOutputChannel("CodeOnly", { log: true });
   // A plain channel, which VS Code does not rotate at 5 MB as it does log channels.
   const hiddenLines = vscode.window.createOutputChannel("CodeOnly Hidden Lines");
-  const tree = new ResultsTree(settings.collapseMode);
+  // Any command the window runs will do; this one has no visible effect.
+  const tree = new ResultsTree(settings.collapseMode, () =>
+    vscode.commands.executeCommand("setContext", "codeonly.resultsPing", true),
+  );
   const treeView = vscode.window.createTreeView<ResultNode>(RESULTS_VIEW_ID, {
     treeDataProvider: tree,
     showCollapseAll: true,
