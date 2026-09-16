@@ -2,24 +2,51 @@ import * as vscode from "vscode";
 import type { CodeOnlyApi, ResultEntry } from "./api";
 import { MatchHighlights } from "./ui/matchHighlights";
 import { QUERY_VIEW_ID, QueryViewProvider } from "./ui/queryView";
-import { type OpenResultArgs, type ResultNode, ResultsTree, isResultNode, openArgs } from "./ui/resultsTree";
+import {
+  type LineNode,
+  type OpenResultArgs,
+  type ResultNode,
+  ResultsTree,
+  isResultNode,
+  openArgs,
+} from "./ui/resultsTree";
 import { RESULTS_VIEW_ID, SearchController } from "./ui/searchController";
 import * as settings from "./ui/settings";
 
 export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const log = vscode.window.createOutputChannel("CodeOnly", { log: true });
-  const tree = new ResultsTree(settings.collapseMode);
+  // A plain channel, which VS Code does not rotate at 5 MB as it does log channels.
+  const hiddenLines = vscode.window.createOutputChannel("CodeOnly Hidden Lines");
+  // Any command the window runs will do; this one has no visible effect.
+  const tree = new ResultsTree(settings.collapseMode, () =>
+    vscode.commands.executeCommand("setContext", "codeonly.resultsPing", true),
+  );
   const treeView = vscode.window.createTreeView<ResultNode>(RESULTS_VIEW_ID, {
     treeDataProvider: tree,
     showCollapseAll: true,
   });
   const highlights = new MatchHighlights(tree, () => treeView.visible);
-  const controller = new SearchController(context.workspaceState, tree, treeView, log);
+  const controller = new SearchController(context.workspaceState, tree, treeView, log, hiddenLines);
   const queryView = new QueryViewProvider(context.extensionUri, controller);
   controller.view = queryView;
 
-  const target = (node: unknown): ResultNode | undefined =>
-    isResultNode(node) ? node : treeView.selection[0];
+  let lastSelected: ResultNode | undefined;
+  // While VS Code rebuilds the tree it reports no selection, so the last one is kept.
+  const selected = (): ResultNode | undefined =>
+    treeView.selection[0] ?? (lastSelected && tree.contains(lastSelected) ? lastSelected : undefined);
+  // A row passes itself, or undefined if VS Code could not resolve it; a key binding or the
+  // Command Palette passes nothing and means the selection.
+  const target = (args: unknown[]): ResultNode | undefined =>
+    args.length === 0 ? selected() : isResultNode(args[0]) ? args[0] : undefined;
+
+  const reveal = async (node: LineNode) => {
+    lastSelected = node;
+    try {
+      await treeView.reveal(node, { select: true, focus: false });
+    } catch {
+      // VS Code cannot resolve the item when a refresh starts meanwhile; the editor still opens.
+    }
+  };
 
   const open = async (args: OpenResultArgs, sideBySide = false) => {
     const line = args.line - 1;
@@ -36,9 +63,13 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   };
 
   const step = async (direction: 1 | -1) => {
-    const next = tree.neighbor(treeView.selection[0], direction);
+    const next = tree.neighbor(selected(), direction);
     if (next) {
-      await treeView.reveal(next, { select: true, focus: false });
+      // The view can only select a result it has read.
+      if (!tree.isShown(next.file)) {
+        tree.flush();
+      }
+      await reveal(next);
       await open(openArgs(next));
     }
   };
@@ -51,6 +82,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
 
   context.subscriptions.push(
     log,
+    hiddenLines,
     tree,
     treeView,
     highlights,
@@ -58,6 +90,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     treeView.onDidChangeVisibility(() => highlights.update()),
     // Opening a result is the Search view's cue to keep the term in history.
     treeView.onDidChangeSelection((e) => {
+      lastSelected = e.selection[0] ?? lastSelected;
       if (e.selection.some((node) => node.kind === "line")) {
         controller.rememberShown();
       }
@@ -77,8 +110,8 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     vscode.commands.registerCommand("codeonly.showLog", () => log.show(true)),
     vscode.commands.registerCommand("codeonly.nextResult", () => step(1)),
     vscode.commands.registerCommand("codeonly.previousResult", () => step(-1)),
-    vscode.commands.registerCommand("codeonly.openToSide", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.openToSide", (...args: unknown[]) => {
+      const n = target(args);
       if (n?.kind === "line") {
         return open(openArgs(n), true);
       }
@@ -87,21 +120,19 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       }
       return undefined;
     }),
-    vscode.commands.registerCommand("codeonly.dismiss", async (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.dismiss", async (...args: unknown[]) => {
+      const n = target(args);
       if (!n) {
         return;
       }
       // Like the Search view, when the selected result goes away the next one is selected and shown.
-      const selected = treeView.selection[0];
-      const holdsSelection = selected === n || (n.kind === "file" && selected?.kind === "line" && selected.file === n);
+      const current = selected();
+      const holdsSelection = current === n || (n.kind === "file" && current?.kind === "line" && current.file === n);
       const next = holdsSelection ? tree.successor(n) : undefined;
-      tree.dismiss(n);
+      tree.dismiss(n, next !== undefined && !tree.isShown(next.file));
       controller.resultsChanged();
       if (next && !tree.isEmpty) {
-        // The successor may belong to a file added during a search and not yet shown.
-        tree.refresh();
-        await treeView.reveal(next, { select: true, focus: false });
+        await reveal(next);
         // The reveal waits for the refresh; a new search may have replaced the results meanwhile.
         if (tree.contains(next)) {
           await open(openArgs(next));
@@ -110,16 +141,16 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       // The Search view returns focus to its results after a removal.
       await vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
     }),
-    vscode.commands.registerCommand("codeonly.copy", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copy", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n?.kind === "line" ? n.line.text : n?.result.absolutePath);
     }),
-    vscode.commands.registerCommand("codeonly.copyPath", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copyPath", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n && (n.kind === "line" ? n.file : n).result.absolutePath);
     }),
-    vscode.commands.registerCommand("codeonly.copyRelativePath", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copyRelativePath", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n && (n.kind === "line" ? n.file : n).result.relativePath);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -142,7 +173,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     search: (form) => controller.search({ ...controller.currentForm(), ...form }, false, true),
     form: () => controller.currentForm(),
     status: () => controller.currentStatus(),
-    resultTree: async () => tree.getChildren().map(entry),
+    resultTree: async () => tree.roots().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
     highlightedRanges: (uri) => highlights.rangesFor(uri),
     editForm: (form) => controller.onFormChanged({ ...controller.currentForm(), ...form }),

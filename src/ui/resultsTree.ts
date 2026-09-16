@@ -35,10 +35,16 @@ export interface ResultCounts {
 /** "auto" collapses files with more results than this, as the Search view does. */
 const AUTO_COLLAPSE_THRESHOLD = 10;
 /**
- * VS Code debounces tree refreshes by 200 ms and restarts that wait on every change, so changes
- * that come more often than this would hold back every refresh until the search ends.
+ * Shortest pause between the view reading the tree and the next refresh. VS Code debounces tree
+ * refreshes by 200 ms and restarts that wait on every change, so shorter pauses would hold back
+ * every refresh until the search ends.
  */
-const REFRESH_DELAY_MS = 300;
+const MIN_REFRESH_PAUSE_MS = 300;
+/**
+ * The pause is this many times as long as the view took to read the tree. VS Code rereads every
+ * expanded node on each refresh, so a fixed pause would let refreshes starve the search.
+ */
+const REFRESH_PAUSE_FACTOR = 2;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -72,11 +78,31 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   private generation = 0;
   private expandAll = false;
   private refreshTimer: NodeJS.Timeout | undefined;
+  private pingTimer: NodeJS.Timeout | undefined;
+  private pingsOutstanding = 0;
+  /** Results added since the last refresh. */
+  private pending = false;
+  /** A refresh was pushed and the view has not read the tree since. */
+  private awaitingRead = false;
+  /** When the view last read the root, and when it last read anything. */
+  private rootReadAt = Date.now();
+  private lastReadAt = this.rootReadAt;
+  /** Files as of the view's last read of the tree. */
+  private shown = new Set<FileNode>();
+  private shownAny = false;
 
-  constructor(private readonly collapseMode: () => CollapseMode) {}
+  /**
+   * @param ping A round trip to the window, which answers only after it has processed the tree
+   *   it read before.
+   */
+  constructor(
+    private readonly collapseMode: () => CollapseMode,
+    private readonly ping: () => Thenable<unknown> = () => Promise.resolve(),
+  ) {}
 
   dispose(): void {
     clearTimeout(this.refreshTimer);
+    clearTimeout(this.pingTimer);
     this.changed.dispose();
     this.resetEmitter.dispose();
   }
@@ -99,14 +125,37 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return { fileCount: this.files.size, matchCount, unfilteredFileCount };
   }
 
-  reset(folders: readonly vscode.WorkspaceFolder[]): void {
+  /** Whether the last refresh pushed to the view had results. */
+  get showsResults(): boolean {
+    return this.shownAny;
+  }
+
+  /** Whether the view has read the tree since `file` was added. */
+  isShown(file: FileNode): boolean {
+    return this.shown.has(file);
+  }
+
+  /**
+   * Replaces the results. With `deferred`, the view keeps the old results until the next refresh,
+   * so that a new search does not flash an empty list.
+   */
+  reset(folders: readonly vscode.WorkspaceFolder[], deferred = false): void {
     this.files = new Map();
     this.sorted = undefined;
     this.folders = folders;
     this.generation++;
     this.expandAll = false;
     this.resetEmitter.fire();
-    this.refresh();
+    if (!deferred) {
+      this.refresh();
+      return;
+    }
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
+    this.pending = true;
+    this.awaitingRead = false;
+    this.rootReadAt = this.lastReadAt = Date.now();
+    this.schedule();
   }
 
   fileFor(uri: vscode.Uri): FileNode | undefined {
@@ -121,17 +170,64 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     node.lines = result.lines.map((line) => ({ kind: "line", file: node, line }));
     this.files.set(result.absolutePath, node);
     this.sorted = undefined;
-    this.refreshTimer ??= setTimeout(() => this.refresh(), REFRESH_DELAY_MS);
+    this.pending = true;
+    this.schedule();
   }
 
-  /** Pushes pending changes to the view now. */
+  /** Pushes pending results to the view now. */
+  flush(): void {
+    if (this.pending) {
+      this.refresh();
+    }
+  }
+
+  /** Pushes the whole tree to the view now. */
   refresh(): void {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = undefined;
+    this.pending = false;
+    this.awaitingRead = true;
+    this.shownAny = this.files.size > 0;
     this.changed.fire(undefined);
   }
 
-  dismiss(node: ResultNode): void {
+  private schedule(): void {
+    if (!this.pending || this.refreshTimer || this.waitingForView()) {
+      return;
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      // A busy view schedules this again when it answers its ping.
+      if (this.waitingForView()) {
+        return;
+      }
+      if (Date.now() >= this.nextRefreshAt()) {
+        this.refresh();
+      } else {
+        this.schedule();
+      }
+    }, this.nextRefreshAt() - Date.now());
+  }
+
+  private waitingForView(): boolean {
+    return this.awaitingRead || this.pingTimer !== undefined || this.pingsOutstanding > 0;
+  }
+
+  /**
+   * The view reads the root, then the items and children of expanded files, and then draws them,
+   * so the time from the root read to the answer to the last ping is what a refresh costs.
+   * Waiting for a hidden view is not counted.
+   */
+  private nextRefreshAt(): number {
+    const took = this.lastReadAt - this.rootReadAt;
+    return this.lastReadAt + Math.max(MIN_REFRESH_PAUSE_MS, REFRESH_PAUSE_FACTOR * took);
+  }
+
+  /**
+   * Removes `node`. With `flush`, pending results are pushed in the same refresh: VS Code waits
+   * only for the first refresh of a batch before it reveals an item.
+   */
+  dismiss(node: ResultNode, flush = false): void {
     const file = node.kind === "file" ? node : node.file;
     if (this.files.get(file.result.absolutePath) !== file) {
       return;
@@ -142,6 +238,8 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     if (node.kind === "file" || file.lines.length === 0) {
       this.files.delete(file.result.absolutePath);
       this.sorted = undefined;
+      this.refresh();
+    } else if (flush && this.pending) {
       this.refresh();
     } else {
       this.changed.fire(file);
@@ -177,9 +275,9 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return lines[(index + lines.length) % lines.length];
   }
 
-  contains(node: LineNode): boolean {
-    const file = this.files.get(node.file.result.absolutePath);
-    return file === node.file && file.lines.includes(node);
+  contains(node: ResultNode): boolean {
+    const file = node.kind === "file" ? node : node.file;
+    return this.files.get(file.result.absolutePath) === file && (node.kind === "file" || file.lines.includes(node));
   }
 
   /** The line to select once `node` is dismissed: the next one after it, else the one before. */
@@ -193,9 +291,31 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return lines[lines.indexOf(own[own.length - 1]) + 1] ?? lines[first - 1];
   }
 
+  private noteRead(): void {
+    this.lastReadAt = Date.now();
+    // Reads come in bursts; one ping after each burst.
+    this.pingTimer ??= setTimeout(() => {
+      this.pingTimer = undefined;
+      this.pingsOutstanding++;
+      const answered = () => {
+        this.pingsOutstanding--;
+        this.lastReadAt = Date.now();
+        this.schedule();
+      };
+      Promise.resolve(this.ping()).then(answered, answered);
+    }, 0);
+  }
+
+  /** Called by the view; each call counts as a read (see {@link nextRefreshAt}). */
   getChildren(node?: ResultNode): ResultNode[] {
+    this.noteRead();
     if (!node) {
-      return this.roots();
+      this.awaitingRead = false;
+      this.rootReadAt = this.lastReadAt;
+      const roots = this.roots();
+      this.shown = new Set(roots);
+      this.schedule();
+      return roots;
     }
     return node.kind === "file" ? node.lines : [];
   }
@@ -204,7 +324,9 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return node.kind === "line" ? node.file : undefined;
   }
 
+  /** Called by the view; each call counts as a read. */
   getTreeItem(node: ResultNode): vscode.TreeItem {
+    this.noteRead();
     return node.kind === "file" ? this.fileItem(node) : this.lineItem(node);
   }
 

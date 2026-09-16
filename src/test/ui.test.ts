@@ -272,6 +272,29 @@ suite("search UI", () => {
     assert.equal(api.status().kind, "idle");
   });
 
+  test("a result action given a row that no longer resolves leaves the selection alone", async () => {
+    const lineCount = async () => (await api.resultTree()).reduce((n, f) => n + f.children.length, 0);
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const before = await lineCount();
+    await vscode.commands.executeCommand("codeonly.dismiss", undefined);
+    assert.equal(await lineCount(), before);
+  });
+
+  test("next result continues from the last selected result after the tree is rebuilt", async () => {
+    const at = () => {
+      const editor = vscode.window.activeTextEditor;
+      return `${path.basename(editor?.document.uri.fsPath ?? "")}:${editor?.selection.active.line}`;
+    };
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(at(), "Makefile:0");
+    await vscode.commands.executeCommand("codeonly.expandAll");
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(at(), "Makefile:1");
+  });
+
   test("next result reuses an editor group where the file is already visible", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
@@ -367,6 +390,35 @@ suite("search UI", () => {
       await files.update("exclude", undefined, vscode.ConfigurationTarget.Global);
       await search.update("exclude", undefined, vscode.ConfigurationTarget.Global);
     }
+  });
+
+  test("window-scoped search settings are read without a folder, as VS Code expects", () => {
+    const workspace = vscode.workspace as { getConfiguration: typeof vscode.workspace.getConfiguration };
+    const original = workspace.getConfiguration;
+    const readWithFolder: string[] = [];
+    workspace.getConfiguration = (section, scope) => {
+      const config = original(section, scope);
+      if (!scope) {
+        return config;
+      }
+      return {
+        get: (key: string, fallback?: unknown) => {
+          readWithFolder.push(`${section}.${key}`);
+          return config.get(key, fallback);
+        },
+        has: (key: string) => config.has(key),
+        inspect: (key: string) => config.inspect(key),
+        update: (...args: Parameters<vscode.WorkspaceConfiguration["update"]>) => config.update(...args),
+      } as vscode.WorkspaceConfiguration;
+    };
+    try {
+      folderOptions(vscode.Uri.file(FIXTURE));
+    } finally {
+      workspace.getConfiguration = original;
+    }
+    assert.ok(readWithFolder.includes("search.exclude"), JSON.stringify(readWithFolder));
+    assert.ok(!readWithFolder.includes("search.followSymlinks"), JSON.stringify(readWithFolder));
+    assert.ok(!readWithFolder.includes("search.smartCase"), JSON.stringify(readWithFolder));
   });
 
   test("dismiss removes a result and clear removes all", async () => {

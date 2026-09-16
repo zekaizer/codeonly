@@ -38,6 +38,8 @@ export interface ViewChannel {
   focusInput(): void;
 }
 
+export type HiddenLinesOutput = Pick<vscode.OutputChannel, "replace" | "show">;
+
 interface HiddenLine {
   readonly location: string;
   readonly lineNumber: number;
@@ -65,6 +67,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     private readonly tree: ResultsTree,
     private readonly treeView: vscode.TreeView<unknown>,
     private readonly log: vscode.LogOutputChannel,
+    private readonly hiddenLines: HiddenLinesOutput,
   ) {
     this.form = { ...EMPTY_FORM, ...state.get<Partial<QueryForm>>(FORM_KEY) };
     this.history = state.get<string[]>(HISTORY_KEY, []);
@@ -216,7 +219,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       },
     }));
 
-    this.tree.reset(folders);
+    this.tree.reset(folders, true);
     this.shownPattern = form.pattern;
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
     const progress = setInterval(() => {
@@ -250,7 +253,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (id !== this.runId) {
         return undefined;
       }
-      this.tree.refresh();
+      this.tree.flush();
       this.setStatus({
         kind: "done",
         ...this.tree.counts(),
@@ -427,10 +430,19 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let description: string | undefined;
     switch (s.kind) {
       case "searching":
-        message = s.matchCount === 0 ? "Searching…" : undefined;
+        // Old results stay listed until the new ones are shown.
+        message = s.matchCount === 0 && !this.tree.showsResults ? "Searching…" : undefined;
         break;
       case "done":
-        message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;
+        // The query view's status line may be cut off in a short pane, so the limit is repeated here.
+        message =
+          s.matchCount === 0
+            ? s.cancelled
+              ? "Search stopped."
+              : "No results found."
+            : s.limitHit
+              ? `Only the first ${(s.maxResults ?? s.matchCount).toLocaleString()} results are shown.`
+              : undefined;
         description =
           s.matchCount === 0
             ? undefined
@@ -498,10 +510,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
     hidden.sort((a, b) => a.location.localeCompare(b.location) || a.lineNumber - b.lineNumber);
     this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${makePreview(h.text, []).label}`);
-    this.log.info(`Hidden lines for "${form.pattern}" (${hidden.length}):`);
-    for (const line of this.report) {
-      this.log.info(`  ${line}`);
-    }
+    this.hiddenLines.replace([`Hidden lines for "${form.pattern}" (${hidden.length}):`, ...this.report, ""].join("\n"));
   }
 
   private async showHiddenLines(): Promise<void> {
@@ -510,12 +519,12 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (this.report.length === 0 && this.status.kind === "done" && this.status.hiddenLineCount > 0) {
         await this.rerun();
       }
-      this.log.show(true);
+      this.hiddenLines.show(true);
       return;
     }
     const enable = "Enable and Search Again";
     const choice = await vscode.window.showInformationMessage(
-      "Hidden lines are written to the CodeOnly output only while 'codeonly.diagnostics.logExcludedLines' is on.",
+      "Hidden lines are listed in the CodeOnly Hidden Lines output only while 'codeonly.diagnostics.logExcludedLines' is on.",
       enable,
     );
     if (choice === enable) {
@@ -523,7 +532,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         .getConfiguration("codeonly")
         .update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
       await this.rerun();
-      this.log.show(true);
+      this.hiddenLines.show(true);
     }
   }
 }
