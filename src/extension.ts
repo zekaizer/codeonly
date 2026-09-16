@@ -102,8 +102,13 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
         // The successor may belong to a file added during a search and not yet shown.
         tree.refresh();
         await treeView.reveal(next, { select: true, focus: false });
-        await open(openArgs(next));
+        // The reveal waits for the refresh; a new search may have replaced the results meanwhile.
+        if (tree.contains(next)) {
+          await open(openArgs(next));
+        }
       }
+      // The Search view returns focus to its results after a removal.
+      await vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
     }),
     vscode.commands.registerCommand("codeonly.copy", (node?: unknown) => {
       const n = target(node);
