@@ -5,7 +5,14 @@ import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
 import { type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
-import { ScopeError, type ScopedFolder, deepestRoot, resolveScope, searchPathFor } from "../search/scope";
+import {
+  ScopeError,
+  type ScopedFolder,
+  type WorkspaceRoot,
+  deepestRoot,
+  resolveScope,
+  searchPathFor,
+} from "../search/scope";
 import {
   EMPTY_FORM,
   type FormField,
@@ -154,8 +161,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
     let scoped: ScopedFolder[];
     try {
-      const roots = folders.map((f) => ({ name: f.name, path: f.uri.fsPath }));
-      scoped = resolveScope(form.includes, form.excludes, roots, os.homedir());
+      scoped = resolveScope(form.includes, form.excludes, workspaceRoots(), os.homedir(), usesMultiRootRules());
     } catch (e) {
       if (e instanceof ScopeError) {
         this.fail(e.message, undefined, e.field);
@@ -337,7 +343,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   /** Scopes the query to `uris` (Explorer selection), each relative to its workspace folder. */
   async findInFolder(uris: readonly vscode.Uri[]): Promise<void> {
-    const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => ({ name: f.name, path: f.uri.fsPath }));
+    const roots = workspaceRoots();
     const scopes: string[] = [];
     for (const uri of uris) {
       const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -347,7 +353,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       // A selected file stands for its folder, as in the Search view.
       const stat = await fs.promises.stat(uri.fsPath).catch(() => undefined);
       const target = stat?.isFile() ? path.dirname(uri.fsPath) : uri.fsPath;
-      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, roots);
+      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, roots, usesMultiRootRules());
       if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;
@@ -601,6 +607,18 @@ function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
     durationMs: a.durationMs + b.durationMs,
     warnings: [...a.warnings, ...b.warnings],
   };
+}
+
+/** The folders that can be searched: those on the extension host's file system. */
+function workspaceRoots(): WorkspaceRoot[] {
+  return (vscode.workspace.workspaceFolders ?? [])
+    .filter((f) => f.uri.scheme === "file")
+    .map((f) => ({ name: f.name, path: f.uri.fsPath }));
+}
+
+/** VS Code applies multi-root path rules whenever a workspace file is open, even with one folder. */
+function usesMultiRootRules(): boolean {
+  return vscode.workspace.workspaceFile !== undefined;
 }
 
 /** The form field a search error is about, if any. */

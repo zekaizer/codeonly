@@ -146,3 +146,19 @@ suite("owning search root", () => {
     assert.equal(deepestRoot("/w/c/d/x.c", roots), "/w/c");
   });
 });
+
+suite("workspace file with one folder", () => {
+  test("uses the multi-root rules, as VS Code does when a workspace file is open", () => {
+    assert.deepEqual(resolveScope("./ws/src", "./ws/out", single, HOME, true), [
+      { path: "/ws", includes: ["src", "src/**"], excludes: ["out", "out/**"] },
+    ]);
+    assert.throws(() => resolveScope("./src", "", single, HOME, true), ScopeError);
+    assert.equal(searchPathFor("/ws/src", single[0], single, true), "./ws/src");
+    assert.equal(searchPathFor("/ws", single[0], single, true), "./ws");
+  });
+
+  test("a single folder opened directly keeps the single-root rules", () => {
+    assert.deepEqual(resolveScope("./src", "", single, HOME, false), [{ path: "/ws", includes: ["src", "src/**"], excludes: [] }]);
+    assert.equal(searchPathFor("/ws/src", single[0], single, false), "./src");
+  });
+});
