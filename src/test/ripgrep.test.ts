@@ -105,6 +105,11 @@ suite("ripgrep arguments", () => {
     assert.equal(valueAfter(args, "--regexp"), "\\x{0066}oo\\x{0062}(?=;)\\\\u0041");
   });
 
+  test("escaped braces in a folder name are not expanded", () => {
+    const args = buildRipgrepArgs(query("foo", { includes: ["d[{]1[}]", "d[{]1[}]/**"] }), folder);
+    assert.deepEqual(globs(args).slice(0, 3), ["!*", "/d[{]1[}]", "/d[{]1[}]/**"]);
+  });
+
   test("folder-relative includes list every parent so ripgrep can prune other directories", () => {
     const args = buildRipgrepArgs(
       query("foo", { includes: ["drivers/{gpu,media}", "drivers/{gpu,media}/**", "fs/ext4/*.c", "fs/ext4/*.c/**"] }),

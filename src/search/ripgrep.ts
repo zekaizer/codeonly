@@ -112,22 +112,27 @@ function pathPrefixes(glob: string): string[] {
   return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
-/** Expands `{a,b}` groups, as VS Code does before listing include prefixes. */
+/** Expands `{a,b}` groups, as VS Code does before listing include prefixes. Braces in `[...]` are literal. */
 function expandBraces(glob: string): string[] {
-  const open = glob.indexOf("{");
-  if (open < 0) {
-    return [glob];
-  }
-  let depth = 0;
+  let open = -1;
   let close = -1;
-  for (let i = open; i < glob.length && close < 0; i++) {
-    if (glob[i] === "{") {
-      depth++;
-    } else if (glob[i] === "}" && --depth === 0) {
+  let depth = 0;
+  let inClass = false;
+  for (let i = 0; i < glob.length && close < 0; i++) {
+    const ch = glob[i];
+    if (inClass) {
+      inClass = ch !== "]";
+    } else if (ch === "[") {
+      inClass = true;
+    } else if (ch === "{") {
+      if (depth++ === 0) {
+        open = i;
+      }
+    } else if (ch === "}" && depth > 0 && --depth === 0) {
       close = i;
     }
   }
-  if (close < 0) {
+  if (open < 0 || close < 0) {
     return [glob];
   }
   const head = glob.slice(0, open);
@@ -147,14 +152,14 @@ function splitOutsideGroups(text: string, separator: string): string[] {
       current = "";
       continue;
     }
-    if (ch === "{") {
+    if (brackets) {
+      brackets = ch !== "]";
+    } else if (ch === "[") {
+      brackets = true;
+    } else if (ch === "{") {
       braces++;
     } else if (ch === "}" && braces > 0) {
       braces--;
-    } else if (ch === "[") {
-      brackets = true;
-    } else if (ch === "]") {
-      brackets = false;
     }
     current += ch;
   }

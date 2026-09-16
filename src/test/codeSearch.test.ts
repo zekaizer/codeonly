@@ -5,7 +5,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { REASON_COMMENT_ONLY } from "../classify/lineDecision";
 import { type FileResult, type SearchRequest, SearchError, type SearchSummary, searchCode } from "../search/codeSearch";
-import type { FolderOptions, SearchQuery } from "../search/query";
+import { type FolderOptions, type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
 import { resolveScope } from "../search/scope";
 
@@ -378,6 +378,13 @@ suite("code search pipeline edge cases", () => {
   test("a \\u escape works together with PCRE2-only syntax", async () => {
     const dir = workspace({ "a.c": "int widget_u(void);\n" });
     assert.deepEqual(shown(await run(dir, "widget_\\u0075(?=\\()", { isRegExp: true }), "a.c"), [1]);
+  });
+
+  test("a folder name with braces can be scoped", async () => {
+    const dir = workspace({ "d{1}/a.c": "int widget_brace;\n", "e/b.c": "int widget_brace;\n" });
+    const [scoped] = resolveScope(`./${escapeGlob("d{1}")}`, "", [{ name: "ws", path: dir }], os.homedir());
+    const o = await run(dir, "widget_brace", { includes: scoped.includes, excludes: scoped.excludes });
+    assert.deepEqual(filesWithLines(o), ["d{1}/a.c"]);
   });
 
   test("a PCRE2-only escape is not taken for a newline", async () => {
