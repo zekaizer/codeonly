@@ -25,10 +25,17 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const queryView = new QueryViewProvider(context.extensionUri, controller);
   controller.view = queryView;
 
-  const target = (node: unknown): ResultNode | undefined =>
-    isResultNode(node) ? node : treeView.selection[0];
+  let lastSelected: ResultNode | undefined;
+  // While VS Code rebuilds the tree it reports no selection, so the last one is kept.
+  const selected = (): ResultNode | undefined =>
+    treeView.selection[0] ?? (lastSelected && tree.contains(lastSelected) ? lastSelected : undefined);
+  // A row passes itself, or undefined if VS Code could not resolve it; a key binding or the
+  // Command Palette passes nothing and means the selection.
+  const target = (args: unknown[]): ResultNode | undefined =>
+    args.length === 0 ? selected() : isResultNode(args[0]) ? args[0] : undefined;
 
   const reveal = async (node: LineNode) => {
+    lastSelected = node;
     try {
       await treeView.reveal(node, { select: true, focus: false });
     } catch {
@@ -51,7 +58,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   };
 
   const step = async (direction: 1 | -1) => {
-    const next = tree.neighbor(treeView.selection[0], direction);
+    const next = tree.neighbor(selected(), direction);
     if (next) {
       // The view can only select a result it has read.
       if (!tree.isShown(next.file)) {
@@ -77,6 +84,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     treeView.onDidChangeVisibility(() => highlights.update()),
     // Opening a result is the Search view's cue to keep the term in history.
     treeView.onDidChangeSelection((e) => {
+      lastSelected = e.selection[0] ?? lastSelected;
       if (e.selection.some((node) => node.kind === "line")) {
         controller.rememberShown();
       }
@@ -96,8 +104,8 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     vscode.commands.registerCommand("codeonly.showLog", () => log.show(true)),
     vscode.commands.registerCommand("codeonly.nextResult", () => step(1)),
     vscode.commands.registerCommand("codeonly.previousResult", () => step(-1)),
-    vscode.commands.registerCommand("codeonly.openToSide", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.openToSide", (...args: unknown[]) => {
+      const n = target(args);
       if (n?.kind === "line") {
         return open(openArgs(n), true);
       }
@@ -106,14 +114,14 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       }
       return undefined;
     }),
-    vscode.commands.registerCommand("codeonly.dismiss", async (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.dismiss", async (...args: unknown[]) => {
+      const n = target(args);
       if (!n) {
         return;
       }
       // Like the Search view, when the selected result goes away the next one is selected and shown.
-      const selected = treeView.selection[0];
-      const holdsSelection = selected === n || (n.kind === "file" && selected?.kind === "line" && selected.file === n);
+      const current = selected();
+      const holdsSelection = current === n || (n.kind === "file" && current?.kind === "line" && current.file === n);
       const next = holdsSelection ? tree.successor(n) : undefined;
       tree.dismiss(n, next !== undefined && !tree.isShown(next.file));
       controller.resultsChanged();
@@ -127,16 +135,16 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       // The Search view returns focus to its results after a removal.
       await vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
     }),
-    vscode.commands.registerCommand("codeonly.copy", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copy", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n?.kind === "line" ? n.line.text : n?.result.absolutePath);
     }),
-    vscode.commands.registerCommand("codeonly.copyPath", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copyPath", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n && (n.kind === "line" ? n.file : n).result.absolutePath);
     }),
-    vscode.commands.registerCommand("codeonly.copyRelativePath", (node?: unknown) => {
-      const n = target(node);
+    vscode.commands.registerCommand("codeonly.copyRelativePath", (...args: unknown[]) => {
+      const n = target(args);
       return copy(n && (n.kind === "line" ? n.file : n).result.relativePath);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {

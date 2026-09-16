@@ -272,6 +272,29 @@ suite("search UI", () => {
     assert.equal(api.status().kind, "idle");
   });
 
+  test("a result action given a row that no longer resolves leaves the selection alone", async () => {
+    const lineCount = async () => (await api.resultTree()).reduce((n, f) => n + f.children.length, 0);
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const before = await lineCount();
+    await vscode.commands.executeCommand("codeonly.dismiss", undefined);
+    assert.equal(await lineCount(), before);
+  });
+
+  test("next result continues from the last selected result after the tree is rebuilt", async () => {
+    const at = () => {
+      const editor = vscode.window.activeTextEditor;
+      return `${path.basename(editor?.document.uri.fsPath ?? "")}:${editor?.selection.active.line}`;
+    };
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(at(), "Makefile:0");
+    await vscode.commands.executeCommand("codeonly.expandAll");
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(at(), "Makefile:1");
+  });
+
   test("next result reuses an editor group where the file is already visible", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
