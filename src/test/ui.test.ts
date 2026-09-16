@@ -273,6 +273,17 @@ suite("search UI", () => {
     await api.search({ includes: "" });
   });
 
+  test("an invalid range in an include glob is reported as a file pattern error", async () => {
+    await api.search({ ...base, pattern: "widget_init", includes: "[b-a].c" });
+    const status = api.status();
+    assert.equal(status.kind, "error");
+    if (status.kind === "error") {
+      assert.match(status.message, /^Invalid file pattern/);
+      assert.equal(status.field, "includes");
+    }
+    await api.search({ includes: "" });
+  });
+
   test("dismiss removes a result and clear removes all", async () => {
     await api.search({ ...base, pattern: "widget_init" });
     const main = fileEntry(await api.resultTree(), "src/main.c");

@@ -10,14 +10,21 @@ const GLOBSTAR = "**";
 /**
  * Compiles globs with the semantics of VS Code's `glob.ts` (which the built-in Search view uses to
  * filter results) into a matcher that is true if any glob matches. Undefined for no globs.
+ * A glob that does not compile (e.g. `[b-a]`) is dropped, as VS Code does; ripgrep reports it.
  */
 export function compileGlobs(globs: readonly string[], ignoreCase: boolean): GlobMatcher | undefined {
   if (globs.length === 0) {
     return undefined;
   }
-  const source = globs.map((g) => `(?:${toRegExp(g)})`).join("|");
-  const re = new RegExp(`^(?:${source})$`, ignoreCase ? "i" : "");
-  return (relativePath) => re.test(relativePath);
+  const res: RegExp[] = [];
+  for (const glob of globs) {
+    try {
+      res.push(new RegExp(`^(?:${toRegExp(glob)})$`, ignoreCase ? "i" : ""));
+    } catch {
+      // Dropped; see above.
+    }
+  }
+  return (relativePath) => res.some((re) => re.test(relativePath));
 }
 
 function stars(count: 1 | 2, isLast = false): string {
