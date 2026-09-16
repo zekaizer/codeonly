@@ -193,6 +193,19 @@ suite("search UI", () => {
     );
   });
 
+  test("the hidden-lines link searches again when the lines were not recorded", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.deepEqual(api.hiddenLineReport(), []);
+    const config = vscode.workspace.getConfiguration("codeonly");
+    await config.update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
+    try {
+      await api.statusCommand("showHiddenLines");
+      assert.ok(api.hiddenLineReport().some((l) => l.includes("src/main.c:1")));
+    } finally {
+      await config.update("diagnostics.logExcludedLines", undefined, vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");

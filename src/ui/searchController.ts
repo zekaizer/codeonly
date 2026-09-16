@@ -96,25 +96,23 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   }
 
   onCommand(command: StatusCommand): void {
+    void this.runCommand(command);
+  }
+
+  async runCommand(command: StatusCommand): Promise<void> {
     switch (command) {
       case "showHiddenLines":
-        void this.showHiddenLines();
-        break;
+        return this.showHiddenLines();
       case "openExcludeSettings":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "search.exclude");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "search.exclude");
       case "openMaxResultsSetting":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "search.maxResults");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "search.maxResults");
       case "openRipgrepSetting":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "codeonly.ripgrepPath");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "codeonly.ripgrepPath");
       case "showLog":
-        this.log.show(true);
-        break;
+        return this.log.show(true);
       case "focusResults":
-        void vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
-        break;
+        return vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
     }
   }
 
@@ -459,6 +457,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   private async showHiddenLines(): Promise<void> {
     if (settings.logExcludedLines()) {
+      // Logging was turned on after this search, so its hidden lines were not recorded.
+      if (this.report.length === 0 && this.status.kind === "done" && this.status.hiddenLineCount > 0) {
+        await this.rerun();
+      }
       this.log.show(true);
       return;
     }
