@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { CodeOnlyApi, ResultEntry } from "../api";
 import { EMPTY_FORM } from "../shared/protocol";
+import { folderOptions } from "../ui/settings";
 
 const FIXTURE = path.resolve(__dirname, "../../test-fixtures/workspace");
 
@@ -282,6 +283,21 @@ suite("search UI", () => {
       assert.equal(status.field, "includes");
     }
     await api.search({ includes: "" });
+  });
+
+  test("search.exclude false overrides files.exclude true", async () => {
+    const files = vscode.workspace.getConfiguration("files");
+    const search = vscode.workspace.getConfiguration("search");
+    await files.update("exclude", { "**/docs": true }, vscode.ConfigurationTarget.Global);
+    await search.update("exclude", { "**/docs": false }, vscode.ConfigurationTarget.Global);
+    try {
+      assert.ok(!folderOptions(vscode.Uri.file(FIXTURE)).excludes.includes("**/docs"));
+      await api.search({ ...base, pattern: "widget_init" });
+      assert.ok(fileEntry(await api.resultTree(), "docs/notes.txt"));
+    } finally {
+      await files.update("exclude", undefined, vscode.ConfigurationTarget.Global);
+      await search.update("exclude", undefined, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test("dismiss removes a result and clear removes all", async () => {

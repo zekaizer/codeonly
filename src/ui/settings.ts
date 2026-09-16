@@ -8,9 +8,10 @@ export type CollapseMode = "auto" | "alwaysCollapse" | "alwaysExpand";
 export function folderOptions(uri: vscode.Uri): FolderOptions {
   const search = vscode.workspace.getConfiguration("search", uri);
   const files = vscode.workspace.getConfiguration("files", uri);
-  const excludes = new Set([...enabledKeys(files.get("exclude")), ...enabledKeys(search.get("exclude"))]);
+  // `search.exclude` wins, so `false` there re-includes what `files.exclude` hides.
+  const excludes = enabledKeys({ ...asObject(files.get("exclude")), ...asObject(search.get("exclude")) });
   return {
-    excludes: [...excludes],
+    excludes,
     useIgnoreFiles: search.get<boolean>("useIgnoreFiles", true),
     useParentIgnoreFiles: search.get<boolean>("useParentIgnoreFiles", false),
     useGlobalIgnoreFiles: search.get<boolean>("useGlobalIgnoreFiles", false),
@@ -21,12 +22,13 @@ export function folderOptions(uri: vscode.Uri): FolderOptions {
   };
 }
 
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
 // `{ "when": ... }` sibling clauses are not supported by ripgrep globs and are skipped.
-function enabledKeys(value: unknown): string[] {
-  if (!value || typeof value !== "object") {
-    return [];
-  }
-  return Object.entries(value as Record<string, unknown>)
+function enabledKeys(value: Record<string, unknown>): string[] {
+  return Object.entries(value)
     .filter(([key, enabled]) => key && enabled === true)
     .map(([key]) => key);
 }
