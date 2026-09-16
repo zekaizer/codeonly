@@ -1,2 +1,7 @@
 CLAUDE.local.md
 .local/
+node_modules/
+dist/
+out/
+.vscode-test/
+*.vsix
