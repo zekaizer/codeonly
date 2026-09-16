@@ -194,17 +194,36 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   };
 }
 
-/** Results are per line, so a pattern that can only match across lines would silently find nothing. */
+/** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
+const NEWLINE_ESCAPE = /^(?:n|x0a|x\{0*a\}|u000a|u\{0*a\}|U0000000a|U\{0*a\}|012|o\{0*12\}|cj)/i;
+
+/**
+ * Results are per line, so a pattern that must match a newline would silently find nothing.
+ * Escapes inside a character class are allowed: `[^\n]` is a useful per-line pattern.
+ */
 function hasNewlineEscape(pattern: string): boolean {
+  let inClass = false;
   for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] === "\n") {
+    const ch = pattern[i];
+    if (ch === "\n") {
       return true;
     }
-    if (pattern[i] === "\\") {
-      if (pattern[i + 1] === "n") {
+    if (ch === "\\") {
+      if (!inClass && NEWLINE_ESCAPE.test(pattern.slice(i + 1, i + 12))) {
         return true;
       }
       i++;
+    } else if (inClass) {
+      inClass = ch !== "]";
+    } else if (ch === "[") {
+      inClass = true;
+      // A leading `]` (after an optional `^`) is a class member.
+      if (pattern[i + 1] === "^") {
+        i++;
+      }
+      if (pattern[i + 1] === "]") {
+        i++;
+      }
     }
   }
   return false;
