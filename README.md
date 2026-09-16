@@ -97,7 +97,8 @@ with VS Code. If it cannot be found, install
 ## Known limitations
 
 - Only C comment syntax is recognised.
-- A regular expression cannot match across lines.
+- A regular expression cannot match across lines, so `\n` and `\r` are
+  rejected, and `\W` or `\s` do not match at the end of a line.
 - Files are read as UTF-8 or plain bytes; `files.encoding` is not applied.
   Matches in UTF-16 encoded C files are hidden.
 - Only folders on disk can be searched, not virtual workspaces.

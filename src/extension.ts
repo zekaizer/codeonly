@@ -23,13 +23,16 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
 
   const open = async (args: OpenResultArgs, sideBySide = false) => {
     const line = args.line - 1;
-    await vscode.window.showTextDocument(vscode.Uri.file(args.path), {
+    const uri = vscode.Uri.file(args.path);
+    // Like a click in the tree, reveal the file where it is already visible.
+    const visible = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
+    await vscode.window.showTextDocument(uri, {
       selection: new vscode.Range(line, args.start, line, args.end),
       preview: !sideBySide,
       preserveFocus: !sideBySide,
-      viewColumn: sideBySide ? vscode.ViewColumn.Beside : undefined,
+      viewColumn: sideBySide ? vscode.ViewColumn.Beside : visible?.viewColumn,
     });
-    controller.remember(controller.currentForm().pattern);
+    controller.rememberShown();
   };
 
   const step = async (direction: 1 | -1) => {
@@ -56,7 +59,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     // Opening a result is the Search view's cue to keep the term in history.
     treeView.onDidChangeSelection((e) => {
       if (e.selection.some((node) => node.kind === "line")) {
-        controller.remember(controller.currentForm().pattern);
+        controller.rememberShown();
       }
     }),
     vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
@@ -126,6 +129,8 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     resultTree: async () => tree.getChildren().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
     highlightedRanges: (uri) => highlights.rangesFor(uri),
+    editForm: (form) => controller.onFormChanged({ ...controller.currentForm(), ...form }),
+    history: () => controller.searchHistory(),
     statusCommand: (command) => controller.runCommand(command),
     contextKeys: () => controller.contextKeys(),
     queryViewReady: () => queryView.whenReady(),

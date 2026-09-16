@@ -231,6 +231,30 @@ suite("search UI", () => {
     await api.search({ excludes: "" });
   });
 
+  test("history keeps the term whose results were used, not one only typed", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    api.editForm({ pattern: "typed_only" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(api.history().at(-1), "widget_count");
+    assert.ok(!api.history().includes("typed_only"));
+    await api.search({ pattern: "widget_count" });
+  });
+
+  test("next result reuses an editor group where the file is already visible", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    await vscode.window.showTextDocument(main, { viewColumn: vscode.ViewColumn.Two, preview: false });
+    await vscode.window.showTextDocument(vscode.Uri.file(path.join(FIXTURE, "Makefile")), {
+      viewColumn: vscode.ViewColumn.One,
+      preview: false,
+    });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const editors = vscode.window.visibleTextEditors.filter((e) => e.document.uri.fsPath === main.fsPath);
+    assert.equal(editors.length, 1);
+    assert.equal(editors[0].viewColumn, vscode.ViewColumn.Two);
+    assert.equal(editors[0].selection.active.line, 4);
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");
@@ -270,6 +294,20 @@ suite("search UI", () => {
     const summary = await api.search({ ...base, pattern: "widget_init", includes: path.join(FIXTURE, "src", "main.c") });
     assert.equal(summary?.fileCount, 1);
     assert.ok(fileEntry(await api.resultTree(), "src/main.c"));
+    await api.search({ includes: "" });
+  });
+
+  test("a file path next to a folder path does not hide the folder's other files", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: `${path.join(FIXTURE, "src", "bom.c")}, ./` });
+    assert.equal(summary?.fileCount, 3);
+    await api.search({ includes: "" });
+  });
+
+  test("find in folder turns selected files into their folders", async () => {
+    const src = vscode.Uri.file(path.join(FIXTURE, "src"));
+    const file = vscode.Uri.file(path.join(FIXTURE, "docs", "notes.txt"));
+    await vscode.commands.executeCommand("codeonly.findInFolder", src, [src, file]);
+    assert.equal(api.form().includes, "./src, ./docs");
     await api.search({ includes: "" });
   });
 

@@ -49,6 +49,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private report: string[] = [];
   private readonly contextValues: Record<string, unknown> = {};
   private queryFocused = false;
+  /** The term whose results the tree shows. */
+  private shownPattern: string | undefined;
   view: ViewChannel | undefined;
 
   constructor(
@@ -76,6 +78,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   hiddenLineReport(): readonly string[] {
     return this.report;
+  }
+
+  searchHistory(): readonly string[] {
+    return this.history;
   }
 
   contextKeys(): Readonly<Record<string, unknown>> {
@@ -191,7 +197,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
-    const targets: SearchTarget[] = searchable.map((scope) => ({
+    const targets: SearchTarget[] = searchable.map(({ fileOnly, ...scope }) => ({
+      fileOnly,
       folder: { path: scope.path, options: settings.folderOptions(vscode.Uri.file(scope.path)) },
       query: {
         pattern: form.pattern,
@@ -204,6 +211,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }));
 
     this.tree.reset(folders);
+    this.shownPattern = form.pattern;
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
     const progress = setInterval(() => {
       if (id === this.runId) {
@@ -336,13 +344,18 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (!folder) {
         continue;
       }
-      const scope = searchPathFor(uri.fsPath, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
+      // A selected file stands for its folder, as in the Search view.
+      const stat = await fs.promises.stat(uri.fsPath).catch(() => undefined);
+      const target = stat?.isFile() ? path.dirname(uri.fsPath) : uri.fsPath;
+      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
       if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;
         break;
       }
-      scopes.push(scope);
+      if (!scopes.includes(scope)) {
+        scopes.push(scope);
+      }
     }
     if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
@@ -353,6 +366,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.view?.focusInput();
     if (this.form.pattern) {
       void this.search(this.form, false);
+    }
+  }
+
+  /** Keeps the term of the listed results in history; typed but unsearched text is not kept. */
+  rememberShown(): void {
+    if (this.shownPattern !== undefined && !this.tree.isEmpty) {
+      this.remember(this.shownPattern);
     }
   }
 
@@ -502,20 +522,27 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 interface SearchTarget {
   readonly folder: SearchFolder;
   readonly query: SearchQuery;
+  /** Searches one file through its folder; that folder does not own the other files below it. */
+  readonly fileOnly: boolean;
 }
 
 /**
  * Keeps the roots that exist, as VS Code does. A file becomes its folder with an include for
  * just that file, since ripgrep cannot run inside a file.
  */
-async function existingRoots(scoped: readonly ScopedFolder[]): Promise<ScopedFolder[]> {
-  const out: ScopedFolder[] = [];
+async function existingRoots(scoped: readonly ScopedFolder[]): Promise<(ScopedFolder & { fileOnly: boolean })[]> {
+  const out: (ScopedFolder & { fileOnly: boolean })[] = [];
   for (const scope of scoped) {
     const stat = await fs.promises.stat(scope.path).catch(() => undefined);
     if (stat?.isDirectory()) {
-      out.push(scope);
+      out.push({ ...scope, fileOnly: false });
     } else if (stat?.isFile()) {
-      out.push({ path: path.dirname(scope.path), includes: [escapeGlob(path.basename(scope.path))], excludes: scope.excludes });
+      out.push({
+        path: path.dirname(scope.path),
+        includes: [escapeGlob(path.basename(scope.path))],
+        excludes: scope.excludes,
+        fileOnly: true,
+      });
     }
   }
   return out;
@@ -531,8 +558,8 @@ async function searchTargets(
   skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
-  const roots = targets.map((t) => t.folder.path);
-  for (const { folder, query } of targets) {
+  const roots = targets.filter((t) => !t.fileOnly).map((t) => t.folder.path);
+  for (const { folder, query, fileOnly } of targets) {
     const remaining = maxResults === undefined ? undefined : maxResults - (total?.matchCount ?? 0);
     const summary = await searchCode({
       rgPath,
@@ -541,7 +568,7 @@ async function searchTargets(
       maxResults: remaining,
       signal,
       // A hit below a more specific searched root belongs to that root's run.
-      skip: (file) => skip(file) || deepestRoot(file, roots) !== folder.path,
+      skip: (file) => skip(file) || (!fileOnly && deepestRoot(file, roots) !== folder.path),
       onResult,
     });
     total = total ? merge(total, summary) : summary;

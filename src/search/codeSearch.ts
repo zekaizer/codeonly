@@ -202,8 +202,8 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   };
 }
 
-/** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
-const NEWLINE_ESCAPE = /^(?:n|x0[aA]|x\{0*[aA]\}|u000[aA]|u\{0*[aA]\}|U0000000[aA]|U\{0*[aA]\}|012|o\{0*12\}|c[jJ])/;
+/** Line feed or carriage return as `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ` (or `\r` forms), after the backslash. */
+const NEWLINE_ESCAPE = /^(?:[nr]|x0[aAdD]|x\{0*[aAdD]\}|u000[aAdD]|u\{0*[aAdD]\}|U0000000[aAdD]|U\{0*[aAdD]\}|01[25]|o\{0*1[25]\}|c[jJmM])/;
 
 /**
  * ripgrep's globs select the files to read, but its prefix globs for folder-relative includes
@@ -224,14 +224,15 @@ function toRelativePath(printed: string): string {
 }
 
 /**
- * Results are per line, so a pattern that must match a newline would silently find nothing.
+ * Results are per line and ripgrep matches lines without their terminator, so a pattern that must
+ * match a line feed or carriage return would silently find nothing.
  * Escapes inside a character class are allowed: `[^\n]` is a useful per-line pattern.
  */
 function hasNewlineEscape(pattern: string): boolean {
   let inClass = false;
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i];
-    if (ch === "\n") {
+    if (ch === "\n" || ch === "\r") {
       return true;
     }
     if (ch === "\\") {
