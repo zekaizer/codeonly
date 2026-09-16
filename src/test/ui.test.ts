@@ -231,6 +231,15 @@ suite("search UI", () => {
     await api.search({ excludes: "" });
   });
 
+  test("history keeps the term whose results were used, not one only typed", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    api.editForm({ pattern: "typed_only" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    assert.equal(api.history().at(-1), "widget_count");
+    assert.ok(!api.history().includes("typed_only"));
+    await api.search({ pattern: "widget_count" });
+  });
+
   test("next result reuses an editor group where the file is already visible", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));

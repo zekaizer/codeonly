@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       preserveFocus: !sideBySide,
       viewColumn: sideBySide ? vscode.ViewColumn.Beside : visible?.viewColumn,
     });
-    controller.remember(controller.currentForm().pattern);
+    controller.rememberShown();
   };
 
   const step = async (direction: 1 | -1) => {
@@ -59,7 +59,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     // Opening a result is the Search view's cue to keep the term in history.
     treeView.onDidChangeSelection((e) => {
       if (e.selection.some((node) => node.kind === "line")) {
-        controller.remember(controller.currentForm().pattern);
+        controller.rememberShown();
       }
     }),
     vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
@@ -129,6 +129,8 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     resultTree: async () => tree.getChildren().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
     highlightedRanges: (uri) => highlights.rangesFor(uri),
+    editForm: (form) => controller.onFormChanged({ ...controller.currentForm(), ...form }),
+    history: () => controller.searchHistory(),
     statusCommand: (command) => controller.runCommand(command),
     contextKeys: () => controller.contextKeys(),
     queryViewReady: () => queryView.whenReady(),

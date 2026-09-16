@@ -49,6 +49,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private report: string[] = [];
   private readonly contextValues: Record<string, unknown> = {};
   private queryFocused = false;
+  /** The term whose results the tree shows. */
+  private shownPattern: string | undefined;
   view: ViewChannel | undefined;
 
   constructor(
@@ -76,6 +78,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   hiddenLineReport(): readonly string[] {
     return this.report;
+  }
+
+  searchHistory(): readonly string[] {
+    return this.history;
   }
 
   contextKeys(): Readonly<Record<string, unknown>> {
@@ -205,6 +211,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }));
 
     this.tree.reset(folders);
+    this.shownPattern = form.pattern;
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
     const progress = setInterval(() => {
       if (id === this.runId) {
@@ -359,6 +366,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.view?.focusInput();
     if (this.form.pattern) {
       void this.search(this.form, false);
+    }
+  }
+
+  /** Keeps the term of the listed results in history; typed but unsearched text is not kept. */
+  rememberShown(): void {
+    if (this.shownPattern !== undefined && !this.tree.isEmpty) {
+      this.remember(this.shownPattern);
     }
   }
 

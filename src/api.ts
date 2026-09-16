@@ -20,6 +20,10 @@ export interface CodeOnlyApi {
   hiddenLineReport(): readonly string[];
   /** Match highlights currently applied to visible editors showing `uri`. */
   highlightedRanges(uri: vscode.Uri): readonly vscode.Range[];
+  /** Applies an edit as if typed into the query view, without searching. */
+  editForm(form: Partial<QueryForm>): void;
+  /** Search history, oldest first. */
+  history(): readonly string[];
   /** Runs a command as if chosen from the query view's status line. */
   statusCommand(command: StatusCommand): Promise<void>;
   /** Context key values last set by the extension. */
