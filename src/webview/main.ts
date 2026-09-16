@@ -239,8 +239,9 @@ formEl.addEventListener("submit", (e) => {
   searchNow(true);
 });
 
-/** Set by a handled option chord until its modifiers are released. */
-let swallowKeyUp = false;
+/** The key of a handled option chord whose key-up is still to come (not on macOS). */
+let chordKey: string | undefined;
+let modifierReleasedFirst = false;
 
 // The webview host forwards every key event to the workbench, where Alt+R would also open the Run
 // menu and Cmd+Alt+C copy a file path. Stopping the event here, before it reaches the host's
@@ -254,17 +255,35 @@ document.addEventListener("keydown", (e) => {
   if (button) {
     e.preventDefault();
     e.stopPropagation();
-    swallowKeyUp = true;
+    if (!IS_MAC) {
+      chordKey = e.code;
+      modifierReleasedFirst = false;
+    }
     toggle(button);
   }
 });
 
-// Otherwise the workbench sees Alt go down and up with nothing between and focuses the menu bar.
+// The workbench saw Alt go down but not the chord's key, so a following Alt key-up would look like
+// a lone Alt press and focus the menu bar (not a thing on macOS). The chord key's own key-up while
+// Alt is still held tells it otherwise, so that one is passed on; if Alt is released first, both
+// key-ups are held back.
 document.addEventListener("keyup", (e) => {
-  if (swallowKeyUp) {
-    e.stopPropagation();
-    swallowKeyUp = e.altKey || e.metaKey;
+  if (chordKey === undefined) {
+    return;
   }
+  if (e.code === chordKey) {
+    if (modifierReleasedFirst) {
+      e.stopPropagation();
+    }
+    chordKey = undefined;
+  } else if (e.key === "Alt") {
+    e.stopPropagation();
+    modifierReleasedFirst = true;
+  }
+});
+
+window.addEventListener("blur", () => {
+  chordKey = undefined;
 });
 
 statusEl.addEventListener("click", (e) => {
