@@ -39,6 +39,16 @@ const detailsPanel = element<HTMLDivElement>("detailsPanel");
 const statusEl = element<HTMLDivElement>("status");
 
 const HISTORY_LIMIT = 50;
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+// The Search view's option keys: Alt+C/W/R, and Cmd+Alt+C/W/R on macOS, where Option alone types characters.
+for (const [button, name, letter] of [
+  [caseToggle, "Match Case", "C"],
+  [wordToggle, "Match Whole Word", "W"],
+  [regexToggle, "Use Regular Expression", "R"],
+] as const) {
+  button.title = `${name} (${IS_MAC ? "⌥⌘" : "Alt+"}${letter})`;
+}
 
 let config: ViewConfig = { searchOnType: true, debounceMs: 300 };
 let history: string[] = [];
@@ -228,7 +238,8 @@ formEl.addEventListener("submit", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) {
+  const modifiers = IS_MAC ? e.altKey && e.metaKey && !e.ctrlKey : e.altKey && !e.ctrlKey && !e.metaKey;
+  if (!modifiers || e.shiftKey || e.isComposing) {
     return;
   }
   const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;

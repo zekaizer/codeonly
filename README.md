@@ -35,8 +35,8 @@ hidden.
 |---|---|
 | `Enter` | Search now and remember the term |
 | `Up` / `Down` | Previous / next remembered term |
-| `Alt+C` / `Alt+W` / `Alt+R` | Match Case / Match Whole Word / Use Regular Expression |
-| `Ctrl+Down` | Move to the results |
+| `Alt+C` / `Alt+W` / `Alt+R` (`Cmd+Alt+C/W/R` on macOS) | Match Case / Match Whole Word / Use Regular Expression |
+| `Ctrl+Down` (`Cmd+Down` on macOS) | Move to the results |
 | `Esc` | Stop the search |
 | `···` button | Show the *include* and *exclude* boxes |
 
