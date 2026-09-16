@@ -15,7 +15,7 @@ export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): st
   if (options.ignoreGlobCase) {
     args.push("--glob-case-insensitive", "--ignore-file-case-insensitive");
   }
-  const includes = unique(query.includes.flatMap(expandSearchGlob));
+  const includes = unique([...query.includes]);
   const rooted = includes.filter((g) => !g.startsWith("**"));
   if (rooted.length > 0) {
     // Exclude everything, then re-include each folder on the way down, as VS Code does.
@@ -30,7 +30,7 @@ export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): st
   for (const glob of options.excludes) {
     args.push("-g", `!${anchorGlob(trimTrailingSlashes(glob.replace(/\\/g, "/")))}`);
   }
-  for (const glob of unique(query.excludes.flatMap(expandSearchGlob))) {
+  for (const glob of unique([...query.excludes])) {
     args.push("-g", `!${anchorGlob(glob)}`);
   }
   if (!options.useIgnoreFiles) {
@@ -92,19 +92,6 @@ function wholeWordRegExp(pattern: string, isRegExp: boolean): string {
 /** Folder-relative globs need a leading `/` to be anchored by ripgrep. */
 function anchorGlob(glob: string): string {
   return glob.startsWith("**") || glob.startsWith("/") ? glob : `/${glob}`;
-}
-
-/**
- * Expands a Search view glob into folder-relative globs: `./dir` and `/dir` stay relative to the
- * folder, anything else matches at any depth. Each also matches everything below it.
- */
-function expandSearchGlob(input: string): string[] {
-  const glob = trimTrailingSlashes(input.replace(/\\/g, "/"));
-  if (glob.startsWith("./") || glob === "." || glob.startsWith("/")) {
-    const rel = glob.replace(/^\.?\/*/, "");
-    return rel ? [rel, `${rel}/**`] : [];
-  }
-  return [`**/${glob}`, `**/${glob}/**`].map((g) => g.replace(/\*\*\/\*\*/g, "**"));
 }
 
 /** `a/b/c` → `a`, `a/b`, `a/b/c`, splitting only outside `{}` and `[]`. */

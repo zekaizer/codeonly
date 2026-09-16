@@ -161,6 +161,14 @@ suite("search UI", () => {
     await api.search({ includes: "" });
   });
 
+  test("an absolute path in include searches that path and keeps workspace-relative names", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: path.join(FIXTURE, "src") });
+    assert.equal(summary?.fileCount, 1);
+    const main = fileEntry(await api.resultTree(), "src/main.c");
+    assert.match(String(main.item.description), /^src\b/);
+    await api.search({ includes: "" });
+  });
+
   test("dismiss removes a result and clear removes all", async () => {
     await api.search({ ...base, pattern: "widget_init" });
     const main = fileEntry(await api.resultTree(), "src/main.c");

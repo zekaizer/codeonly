@@ -7,6 +7,7 @@ import { REASON_COMMENT_ONLY } from "../classify/lineDecision";
 import { type FileResult, type SearchRequest, SearchError, type SearchSummary, searchCode } from "../search/codeSearch";
 import type { FolderOptions, SearchQuery } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
+import { resolveScope } from "../search/scope";
 
 const FIXTURE = path.resolve(__dirname, "../../test-fixtures/workspace");
 
@@ -29,14 +30,23 @@ let rgPath: string;
 
 async function search(
   pattern: string,
-  overrides: Partial<SearchQuery> = {},
+  overrides: Partial<Omit<SearchQuery, "includes" | "excludes">> & { includes?: string; excludes?: string } = {},
   extra: Partial<Pick<SearchRequest, "maxResults" | "signal">> = {},
 ): Promise<Outcome> {
   const results = new Map<string, FileResult>();
+  const [scoped] = resolveScope(overrides.includes ?? "", overrides.excludes ?? "", [{ name: "workspace", path: FIXTURE }], os.homedir());
   const summary = await searchCode({
     rgPath,
-    query: { pattern, isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [], ...overrides },
-    folders: [{ path: FIXTURE, options }],
+    query: {
+      pattern,
+      isRegExp: false,
+      isCaseSensitive: true,
+      isWordMatch: false,
+      ...overrides,
+      includes: scoped.includes,
+      excludes: scoped.excludes,
+    },
+    folders: [{ path: scoped.path, options }],
     onResult: (r) => {
       assert.ok(!results.has(r.relativePath), `duplicate result for ${r.relativePath}`);
       results.set(r.relativePath, r);
@@ -162,14 +172,16 @@ suite("code search pipeline", () => {
   });
 
   test("include and exclude globs", async () => {
-    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./src"] })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./src" })), ["src/main.c"]);
     // Same file set as the built-in Search view: a folder-relative include prunes other folders.
-    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./src", "*.txt"] })), ["src/main.c"]);
-    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./docs", "Makefile"] })), [
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./src, *.txt" })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: "./docs, Makefile" })), [
       "Makefile",
       "docs/notes.txt",
     ]);
-    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: ["*.txt", "Makefile"] })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ".txt" })), ["docs/notes.txt"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: "*.txt, Makefile" })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { excludes: "./src" })), ["Makefile", "docs/notes.txt"]);
   });
 
   test("case-insensitive and whole-word search", async () => {

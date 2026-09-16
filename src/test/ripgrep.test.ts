@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { type FolderOptions, type SearchQuery, escapeGlob, scopeIncludes, splitGlobList } from "../search/query";
+import { type FolderOptions, type SearchQuery, escapeGlob, splitGlobList } from "../search/query";
 import { buildRipgrepArgs, locateRipgrep, ripgrepCandidates } from "../search/ripgrep";
 
 const folder: FolderOptions = {
@@ -83,7 +83,7 @@ suite("ripgrep arguments", () => {
 
   test("include and exclude globs follow VS Code's expansion", () => {
     const args = buildRipgrepArgs(
-      query("foo", { includes: ["./drivers/", "*.c"], excludes: ["build"] }),
+      query("foo", { includes: ["drivers", "drivers/**", "**/*.c", "**/*.c/**"], excludes: ["**/build", "**/build/**"] }),
       { ...folder, excludes: ["**/.git", "out", "/abs/"] },
     );
     assert.deepEqual(globs(args), [
@@ -101,7 +101,10 @@ suite("ripgrep arguments", () => {
   });
 
   test("folder-relative includes list every parent so ripgrep can prune other directories", () => {
-    const args = buildRipgrepArgs(query("foo", { includes: ["./drivers/{gpu,media}/", "./fs/ext4/*.c"] }), folder);
+    const args = buildRipgrepArgs(
+      query("foo", { includes: ["drivers/{gpu,media}", "drivers/{gpu,media}/**", "fs/ext4/*.c", "fs/ext4/*.c/**"] }),
+      folder,
+    );
     assert.deepEqual(globs(args), [
       "!*",
       "/drivers",
@@ -115,7 +118,7 @@ suite("ripgrep arguments", () => {
       "/fs/ext4/*.c/**",
       "!**/.git",
     ]);
-    assert.ok(!globs(buildRipgrepArgs(query("foo", { includes: ["*.c"] }), folder)).includes("!*"));
+    assert.ok(!globs(buildRipgrepArgs(query("foo", { includes: ["**/*.c"] }), folder)).includes("!*"));
   });
 
   test("glob case follows the host file system", () => {
@@ -191,23 +194,3 @@ suite("ripgrep location", () => {
   });
 });
 
-suite("multi-root include scoping", () => {
-  const names = new Set(["a", "b"]);
-
-  test("folder-prefixed globs apply to their folder only", () => {
-    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "a", names), ["./src", "*.c"]);
-    assert.deepEqual(scopeIncludes(["./a/src", "*.c"], "b", names), ["*.c"]);
-  });
-
-  test("a folder targeted only elsewhere is skipped", () => {
-    assert.equal(scopeIncludes(["./a/src"], "b", names), undefined);
-  });
-
-  test("a bare folder prefix includes the whole folder", () => {
-    assert.deepEqual(scopeIncludes(["./a", "./b/x"], "a", names), []);
-  });
-
-  test("relative globs that do not name a folder are kept", () => {
-    assert.deepEqual(scopeIncludes(["./src"], "a", names), ["./src"]);
-  });
-});

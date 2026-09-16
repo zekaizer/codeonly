@@ -1,8 +1,10 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import { type SearchQuery, escapeGlob, scopeIncludes, splitGlobList } from "../search/query";
+import { type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
+import { ScopeError, type ScopedFolder, resolveScope } from "../search/scope";
 import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
 import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
@@ -132,6 +134,17 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       this.fail("Open a folder to search its code.");
       return undefined;
     }
+    let scoped: ScopedFolder[];
+    try {
+      const roots = folders.map((f) => ({ name: f.name, path: f.uri.fsPath }));
+      scoped = resolveScope(form.includes, form.excludes, roots, os.homedir());
+    } catch (e) {
+      if (e instanceof ScopeError) {
+        this.fail(e.message);
+        return undefined;
+      }
+      throw e;
+    }
 
     const rgPath = await this.findRipgrep();
     if (id !== this.runId) {
@@ -157,26 +170,17 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
-    const folderNames = new Set(names.values());
-    const includes = splitGlobList(form.includes);
-    const excludes = splitGlobList(form.excludes);
-    const targets: SearchTarget[] = [];
-    for (const folder of folders) {
-      const scoped = multiRoot ? scopeIncludes(includes, folder.name, folderNames) : includes;
-      if (scoped) {
-        targets.push({
-          folder: { path: folder.uri.fsPath, options: settings.folderOptions(folder.uri) },
-          query: {
-            pattern: form.pattern,
-            isRegExp: form.isRegExp,
-            isCaseSensitive: form.isCaseSensitive,
-            isWordMatch: form.isWordMatch,
-            includes: scoped,
-            excludes,
-          },
-        });
-      }
-    }
+    const targets: SearchTarget[] = scoped.map((scope) => ({
+      folder: { path: scope.path, options: settings.folderOptions(vscode.Uri.file(scope.path)) },
+      query: {
+        pattern: form.pattern,
+        isRegExp: form.isRegExp,
+        isCaseSensitive: form.isCaseSensitive,
+        isWordMatch: form.isWordMatch,
+        includes: scope.includes,
+        excludes: scope.excludes,
+      },
+    }));
 
     this.tree.reset(folders);
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
@@ -186,15 +190,17 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       }
     }, PROGRESS_INTERVAL_MS);
 
-    const onResult = (result: FileResult) => {
-      if (id !== this.runId || seen.has(result.absolutePath)) {
+    const onResult = (found: FileResult) => {
+      if (id !== this.runId || seen.has(found.absolutePath)) {
         return;
       }
+      const result = relativeToWorkspace(found, folders);
       seen.add(result.absolutePath);
       hiddenLineCount += result.excluded.length;
       this.tree.add(result);
       if (logHidden) {
-        const location = multiRoot ? `${names.get(result.folder)}/${result.relativePath}` : result.relativePath;
+        const folderName = names.get(result.folder) ?? path.basename(result.folder);
+        const location = multiRoot ? `${folderName}/${result.relativePath}` : result.relativePath;
         for (const e of result.excluded) {
           hidden.push({ location, lineNumber: e.lineNumber, reason: e.reason, text: e.text });
         }
@@ -516,6 +522,22 @@ function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
     durationMs: a.durationMs + b.durationMs,
     warnings: [...a.warnings, ...b.warnings],
   };
+}
+
+/** A search root below a workspace folder still names files relative to that folder. */
+function relativeToWorkspace(result: FileResult, folders: readonly vscode.WorkspaceFolder[]): FileResult {
+  if (folders.some((f) => f.uri.fsPath === result.folder)) {
+    return result;
+  }
+  const owner = folders.find((f) => {
+    const rel = path.relative(f.uri.fsPath, result.absolutePath);
+    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+  if (!owner) {
+    return result;
+  }
+  const relativePath = path.relative(owner.uri.fsPath, result.absolutePath).split(path.sep).join("/");
+  return { ...result, folder: owner.uri.fsPath, relativePath };
 }
 
 function seedFromEditor(isRegExp: boolean): string | undefined {
