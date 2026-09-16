@@ -17,6 +17,16 @@ function fileEntry(tree: readonly ResultEntry[], rel: string): ResultEntry {
   return entry;
 }
 
+async function waitFor(condition: () => boolean, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error("condition not met in time");
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -191,6 +201,38 @@ suite("search UI", () => {
       assert.equal(status.message, "Invalid regular expression: unclosed group");
     }
     await api.search({ isRegExp: false });
+  });
+
+  test("superseding a running search leaves no stale searching state", async () => {
+    for (const stop of [
+      () => vscode.commands.executeCommand("codeonly.clear"),
+      () => api.search({ pattern: "" }),
+    ]) {
+      const pending = api.search({ ...base, pattern: "widget" });
+      await waitFor(() => api.status().kind === "searching");
+      await stop();
+      await pending;
+      assert.equal(api.contextKeys()["codeonly.searching"], false);
+      assert.equal(api.contextKeys()["codeonly.state"], "idle");
+    }
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.equal(api.contextKeys()["codeonly.searching"], false);
+    assert.equal(api.contextKeys()["codeonly.hasResults"], true);
+  });
+
+  test("a search that cannot start clears the previous results", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.notDeepEqual(await api.resultTree(), []);
+    const config = vscode.workspace.getConfiguration("codeonly");
+    await config.update("ripgrepPath", "/nonexistent/rg", vscode.ConfigurationTarget.Global);
+    try {
+      assert.equal(await api.search({ ...base, pattern: "widget_init" }), undefined);
+      assert.equal(api.status().kind, "error");
+      assert.deepEqual(await api.resultTree(), []);
+      assert.equal(api.contextKeys()["codeonly.hasResults"], false);
+    } finally {
+      await config.update("ripgrepPath", undefined, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test("an empty pattern clears the results", async () => {

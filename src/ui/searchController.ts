@@ -36,6 +36,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private abort: AbortController | undefined;
   private ripgrep: { configured: string; path: string } | undefined;
   private report: string[] = [];
+  private readonly contextValues: Record<string, unknown> = {};
   view: ViewChannel | undefined;
 
   constructor(
@@ -46,7 +47,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   ) {
     this.form = { ...EMPTY_FORM, ...state.get<Partial<QueryForm>>(FORM_KEY) };
     this.history = state.get<string[]>(HISTORY_KEY, []);
-    void this.setContext();
+    this.updateContext();
   }
 
   dispose(): void {
@@ -63,6 +64,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   hiddenLineReport(): readonly string[] {
     return this.report;
+  }
+
+  contextKeys(): Readonly<Record<string, unknown>> {
+    return this.contextValues;
   }
 
   viewState() {
@@ -171,7 +176,6 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
     this.tree.reset(folders);
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
-    void vscode.commands.executeCommand("setContext", "codeonly.searching", true);
     const progress = setInterval(() => {
       if (id === this.runId) {
         this.setStatus({ kind: "searching", ...this.tree.counts() });
@@ -220,7 +224,6 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         return undefined;
       }
       this.ripgrep = undefined;
-      this.tree.reset([]);
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof SearchError) {
         this.fail(message);
@@ -234,7 +237,6 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       clearInterval(progress);
       if (id === this.runId) {
         this.abort = undefined;
-        void vscode.commands.executeCommand("setContext", "codeonly.searching", false);
       }
     }
   }
@@ -258,7 +260,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     if (this.status.kind === "done") {
       this.setStatus({ ...this.status, ...this.tree.counts() });
     } else {
-      void this.setContext();
+      this.updateContext();
     }
   }
 
@@ -314,10 +316,12 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.status = status;
     this.view?.post({ type: "status", status });
     this.updateTreeView();
-    void this.setContext();
+    this.updateContext();
   }
 
+  /** An error replaces the results: whatever is listed no longer matches the query. */
   private fail(message: string, action?: StatusCommand): void {
+    this.tree.reset([]);
     this.setStatus({ kind: "error", message, action });
   }
 
@@ -348,9 +352,19 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
   }
 
-  private async setContext(): Promise<void> {
-    await vscode.commands.executeCommand("setContext", "codeonly.hasResults", !this.tree.isEmpty);
-    await vscode.commands.executeCommand("setContext", "codeonly.state", this.status.kind);
+  /** Context keys are derived from the status and the tree only, so no code path can leave them stale. */
+  private updateContext(): void {
+    const values: Record<string, unknown> = {
+      "codeonly.state": this.status.kind,
+      "codeonly.searching": this.status.kind === "searching",
+      "codeonly.hasResults": !this.tree.isEmpty,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (this.contextValues[key] !== value) {
+        this.contextValues[key] = value;
+        void vscode.commands.executeCommand("setContext", key, value);
+      }
+    }
   }
 
   private async findRipgrep(): Promise<string | undefined> {

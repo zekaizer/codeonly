@@ -119,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     resultTree: async () => tree.getChildren().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
     highlightedRanges: (uri) => highlights.rangesFor(uri),
+    contextKeys: () => controller.contextKeys(),
     queryViewReady: () => queryView.whenReady(),
   };
 }
