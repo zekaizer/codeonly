@@ -35,7 +35,15 @@ export type SearchStatus =
       /** Stopped by the user; counts cover what was found until then. */
       readonly cancelled: boolean;
     }
-  | { readonly kind: "error"; readonly message: string; readonly action?: StatusCommand };
+  | {
+      readonly kind: "error";
+      readonly message: string;
+      readonly action?: StatusCommand;
+      /** The input the error is about, if it is one of the form's fields. */
+      readonly field?: FormField;
+    };
+
+export type FormField = "pattern" | "includes" | "excludes";
 
 /** Commands the query view can ask the extension to run. */
 export type StatusCommand =

@@ -137,12 +137,12 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
   <button type="button" class="icon-button" id="details" aria-expanded="false" aria-controls="detailsPanel"
     title="Toggle Search Details" aria-label="Toggle Search Details"><span aria-hidden="true">···</span></button>
   <div class="details" id="detailsPanel" hidden>
-    <div class="field">
+    <div class="field" id="includesField">
       <label class="prefix" for="includes" title="files to include">include</label>
       <input id="includes" class="input" type="text" spellcheck="false"
         placeholder="e.g. *.c, ./drivers/gpu" aria-label="files to include">
     </div>
-    <div class="field">
+    <div class="field" id="excludesField">
       <label class="prefix" for="excludes" title="files to exclude">exclude</label>
       <input id="excludes" class="input" type="text" spellcheck="false"
         placeholder="e.g. **/tests/**" aria-label="files to exclude">

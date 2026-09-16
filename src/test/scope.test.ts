@@ -117,4 +117,8 @@ suite("search path for an Explorer selection", () => {
     assert.ok(!matcher(path.posix.relative(scoped.path, "/root/a[1]/lib/x.c")));
   });
 
+  test("scope errors name the field they come from", () => {
+    assert.throws(() => resolveScope("", "./nope", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "excludes");
+    assert.throws(() => resolveScope("./nope", "", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "includes");
+  });
 });

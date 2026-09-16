@@ -5,7 +5,14 @@ import { type FileResult, SearchError, type SearchFolder, type SearchSummary, se
 import type { SearchQuery } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
 import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
-import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
+import {
+  EMPTY_FORM,
+  type FormField,
+  type QueryForm,
+  type SearchStatus,
+  type StatusCommand,
+  type ToWebview,
+} from "../shared/protocol";
 import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
 import type { ResultsTree } from "./resultsTree";
@@ -144,7 +151,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       scoped = resolveScope(form.includes, form.excludes, roots, os.homedir());
     } catch (e) {
       if (e instanceof ScopeError) {
-        this.fail(e.message);
+        this.fail(e.message, undefined, e.field);
         return undefined;
       }
       throw e;
@@ -241,7 +248,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       }
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof SearchError) {
-        this.fail(message);
+        this.fail(message, undefined, errorField(e));
         this.log.warn(`Search for "${form.pattern}" failed: ${e.detail ?? message}`);
       } else {
         this.fail(`Search failed: ${message}`, "showLog");
@@ -369,9 +376,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   }
 
   /** An error replaces the results: whatever is listed no longer matches the query. */
-  private fail(message: string, action?: StatusCommand): void {
+  private fail(message: string, action?: StatusCommand, field?: FormField): void {
     this.tree.reset([]);
-    this.setStatus({ kind: "error", message, action });
+    // The field in error has to be visible.
+    if ((field === "includes" || field === "excludes") && !this.form.showDetails) {
+      this.setForm({ ...this.form, showDetails: true }, true);
+    }
+    this.setStatus({ kind: "error", message, action, field });
   }
 
   private updateTreeView(): void {
@@ -534,6 +545,18 @@ function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
     durationMs: a.durationMs + b.durationMs,
     warnings: [...a.warnings, ...b.warnings],
   };
+}
+
+/** The form field a search error is about, if any. */
+function errorField(error: SearchError): FormField | undefined {
+  if (/^(Invalid regular expression|Multi-line)/.test(error.message)) {
+    return "pattern";
+  }
+  const glob = /error parsing glob '([^']*)'/.exec(error.detail ?? "")?.[1];
+  if (glob !== undefined) {
+    return glob.startsWith("!") ? "excludes" : "includes";
+  }
+  return undefined;
 }
 
 /** A search root below a workspace folder still names files relative to that folder. */

@@ -216,6 +216,21 @@ suite("search UI", () => {
     assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, false);
   });
 
+  test("errors point at the field they are about", async () => {
+    const fieldOf = () => {
+      const status = api.status();
+      return status.kind === "error" ? status.field : `not an error: ${status.kind}`;
+    };
+    await api.search({ ...base, pattern: "(", isRegExp: true });
+    assert.equal(fieldOf(), "pattern");
+    await api.search({ ...base, pattern: "widget_init", isRegExp: false, includes: "{a" });
+    assert.equal(fieldOf(), "includes");
+    assert.equal(api.form().showDetails, true);
+    await api.search({ ...base, pattern: "widget_init", includes: "", excludes: "[z" });
+    assert.equal(fieldOf(), "excludes");
+    await api.search({ excludes: "" });
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");

@@ -29,6 +29,8 @@ function element<T extends HTMLElement>(id: string): T {
 const formEl = element<HTMLFormElement>("query");
 const pattern = element<HTMLInputElement>("pattern");
 const patternField = element<HTMLDivElement>("patternField");
+const includesField = element<HTMLDivElement>("includesField");
+const excludesField = element<HTMLDivElement>("excludesField");
 const includes = element<HTMLInputElement>("includes");
 const excludes = element<HTMLInputElement>("excludes");
 const caseToggle = element<HTMLButtonElement>("case");
@@ -351,7 +353,15 @@ function renderStatus(status: SearchStatus): void {
   statusEl.setAttribute("aria-busy", String(status.kind === "searching"));
   statusEl.replaceChildren();
   statusEl.classList.toggle("error", status.kind === "error");
-  patternField.classList.toggle("error", status.kind === "error");
+  const invalid = status.kind === "error" ? status.field : undefined;
+  for (const [name, field, input] of [
+    ["pattern", patternField, pattern],
+    ["includes", includesField, includes],
+    ["excludes", excludesField, excludes],
+  ] as const) {
+    field.classList.toggle("error", invalid === name);
+    input.setAttribute("aria-invalid", String(invalid === name));
+  }
   statusEl.title = "";
   switch (status.kind) {
     case "idle":
