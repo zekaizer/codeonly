@@ -83,6 +83,22 @@ export function resolveScope(
   return out;
 }
 
+/** The longest of `roots` that contains `file`, which is how VS Code assigns a hit to a folder. */
+export function deepestRoot(file: string, roots: readonly string[]): string | undefined {
+  let best: string | undefined;
+  for (const root of roots) {
+    if (isInside(root, file) && (best === undefined || root.length > best.length)) {
+      best = root;
+    }
+  }
+  return best;
+}
+
+function isInside(dir: string, file: string): boolean {
+  const rel = path.relative(dir, file);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
 function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, field: ScopeError["field"]): Parsed {
   const items = splitGlobList(toSlash(text)).map((p) => p.replace(/^~($|\/)/, `${toSlash(homedir)}$1`));
   const globs: string[] = [];

@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
 import { type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
-import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
+import { ScopeError, type ScopedFolder, deepestRoot, resolveScope, searchPathFor } from "../search/scope";
 import {
   EMPTY_FORM,
   type FormField,
@@ -531,6 +531,7 @@ async function searchTargets(
   skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
+  const roots = targets.map((t) => t.folder.path);
   for (const { folder, query } of targets) {
     const remaining = maxResults === undefined ? undefined : maxResults - (total?.matchCount ?? 0);
     const summary = await searchCode({
@@ -539,7 +540,8 @@ async function searchTargets(
       folders: [folder],
       maxResults: remaining,
       signal,
-      skip,
+      // A hit below a more specific searched root belongs to that root's run.
+      skip: (file) => skip(file) || deepestRoot(file, roots) !== folder.path,
       onResult,
     });
     total = total ? merge(total, summary) : summary;
@@ -591,15 +593,15 @@ function relativeToWorkspace(result: FileResult, folders: readonly vscode.Worksp
   if (folders.some((f) => f.uri.fsPath === result.folder)) {
     return result;
   }
-  const owner = folders.find((f) => {
-    const rel = path.relative(f.uri.fsPath, result.absolutePath);
-    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-  });
+  const owner = deepestRoot(
+    result.absolutePath,
+    folders.map((f) => f.uri.fsPath),
+  );
   if (!owner) {
     return result;
   }
-  const relativePath = path.relative(owner.uri.fsPath, result.absolutePath).split(path.sep).join("/");
-  return { ...result, folder: owner.uri.fsPath, relativePath };
+  const relativePath = path.relative(owner, result.absolutePath).split(path.sep).join("/");
+  return { ...result, folder: owner, relativePath };
 }
 
 function seedFromEditor(isRegExp: boolean): string | undefined {

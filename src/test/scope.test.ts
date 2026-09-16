@@ -1,7 +1,7 @@
 import * as assert from "node:assert/strict";
 import * as path from "node:path";
 import { compileGlobs } from "../search/glob";
-import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
+import { ScopeError, type ScopedFolder, deepestRoot, resolveScope, searchPathFor } from "../search/scope";
 
 const HOME = "/home/me";
 const single = [{ name: "ws", path: "/ws" }];
@@ -120,5 +120,15 @@ suite("search path for an Explorer selection", () => {
   test("scope errors name the field they come from", () => {
     assert.throws(() => resolveScope("", "./nope", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "excludes");
     assert.throws(() => resolveScope("./nope", "", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "includes");
+  });
+});
+
+suite("owning search root", () => {
+  test("a file belongs to the deepest searched root that contains it", () => {
+    const roots = ["/w/a", "/w/a/b", "/w/c"];
+    assert.equal(deepestRoot("/w/a/b/x.c", roots), "/w/a/b");
+    assert.equal(deepestRoot("/w/a/x.c", roots), "/w/a");
+    assert.equal(deepestRoot("/w/ab/x.c", roots), undefined);
+    assert.equal(deepestRoot("/w/c/d/x.c", roots), "/w/c");
   });
 });
