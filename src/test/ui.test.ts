@@ -279,6 +279,14 @@ suite("search UI", () => {
     await api.search({ includes: "" });
   });
 
+  test("find in folder turns selected files into their folders", async () => {
+    const src = vscode.Uri.file(path.join(FIXTURE, "src"));
+    const file = vscode.Uri.file(path.join(FIXTURE, "docs", "notes.txt"));
+    await vscode.commands.executeCommand("codeonly.findInFolder", src, [src, file]);
+    assert.equal(api.form().includes, "./src, ./docs");
+    await api.search({ includes: "" });
+  });
+
   test("an invalid range in an include glob is reported as a file pattern error", async () => {
     await api.search({ ...base, pattern: "widget_init", includes: "[b-a].c" });
     const status = api.status();

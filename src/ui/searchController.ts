@@ -337,13 +337,18 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (!folder) {
         continue;
       }
-      const scope = searchPathFor(uri.fsPath, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
+      // A selected file stands for its folder, as in the Search view.
+      const stat = await fs.promises.stat(uri.fsPath).catch(() => undefined);
+      const target = stat?.isFile() ? path.dirname(uri.fsPath) : uri.fsPath;
+      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
       if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;
         break;
       }
-      scopes.push(scope);
+      if (!scopes.includes(scope)) {
+        scopes.push(scope);
+      }
     }
     if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
