@@ -34,7 +34,11 @@ export interface ResultCounts {
 
 /** "auto" collapses files with more results than this, as the Search view does. */
 const AUTO_COLLAPSE_THRESHOLD = 10;
-const REFRESH_DELAY_MS = 150;
+/**
+ * VS Code debounces tree refreshes by 200 ms and restarts that wait on every change, so changes
+ * that come more often than this would hold back every refresh until the search ends.
+ */
+const REFRESH_DELAY_MS = 300;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -171,6 +175,11 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
       index = lines.indexOf(from) + direction;
     }
     return lines[(index + lines.length) % lines.length];
+  }
+
+  contains(node: LineNode): boolean {
+    const file = this.files.get(node.file.result.absolutePath);
+    return file === node.file && file.lines.includes(node);
   }
 
   /** The line to select once `node` is dismissed: the next one after it, else the one before. */

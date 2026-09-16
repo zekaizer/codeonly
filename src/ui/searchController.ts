@@ -423,28 +423,31 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   private updateTreeView(): void {
     const s = this.status;
-    const view = this.treeView;
+    let message: string | undefined;
+    let description: string | undefined;
     switch (s.kind) {
-      case "idle":
-        view.message = undefined;
-        view.description = undefined;
-        break;
       case "searching":
-        view.message = s.matchCount === 0 ? "Searching…" : undefined;
-        view.description = undefined;
+        message = s.matchCount === 0 ? "Searching…" : undefined;
         break;
       case "done":
-        view.message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;
-        view.description =
+        message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;
+        description =
           s.matchCount === 0
             ? undefined
             : `${s.matchCount.toLocaleString()} result${s.matchCount === 1 ? "" : "s"}` +
               (s.hiddenLineCount > 0 ? ` · ${s.hiddenLineCount.toLocaleString()} hidden` : "");
         break;
       case "error":
-        view.message = s.message;
-        view.description = undefined;
+        message = s.message;
         break;
+    }
+    // Every message assignment counts as a tree change and restarts VS Code's refresh debounce,
+    // so unchanged values are left alone.
+    if (this.treeView.message !== message) {
+      this.treeView.message = message;
+    }
+    if (this.treeView.description !== description) {
+      this.treeView.description = description;
     }
   }
 
