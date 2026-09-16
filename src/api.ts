@@ -18,6 +18,8 @@ export interface CodeOnlyApi {
   resultTree(): Promise<ResultEntry[]>;
   /** Hidden-line lines written to the log for the last search; empty unless diagnostics are enabled. */
   hiddenLineReport(): readonly string[];
+  /** Match highlights currently applied to visible editors showing `uri`. */
+  highlightedRanges(uri: vscode.Uri): readonly vscode.Range[];
   /** Resolves once the query view's script has started. */
   queryViewReady(): Promise<void>;
 }

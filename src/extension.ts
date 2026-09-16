@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { CodeOnlyApi, ResultEntry } from "./api";
+import { MatchHighlights } from "./ui/matchHighlights";
 import { QUERY_VIEW_ID, QueryViewProvider } from "./ui/queryView";
 import { type OpenResultArgs, type ResultNode, ResultsTree, isResultNode, openArgs } from "./ui/resultsTree";
 import { RESULTS_VIEW_ID, SearchController } from "./ui/searchController";
@@ -12,6 +13,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     treeDataProvider: tree,
     showCollapseAll: true,
   });
+  const highlights = new MatchHighlights(tree, () => treeView.visible);
   const controller = new SearchController(context.workspaceState, tree, treeView, log);
   const queryView = new QueryViewProvider(context.extensionUri, controller);
   controller.view = queryView;
@@ -48,7 +50,9 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     log,
     tree,
     treeView,
+    highlights,
     controller,
+    treeView.onDidChangeVisibility(() => highlights.update()),
     vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
     vscode.commands.registerCommand("codeonly.focusSearch", () => controller.focusSearch()),
     vscode.commands.registerCommand("codeonly.findInFolder", (uri?: vscode.Uri) => {
@@ -114,6 +118,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     status: () => controller.currentStatus(),
     resultTree: async () => tree.getChildren().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
+    highlightedRanges: (uri) => highlights.rangesFor(uri),
     queryViewReady: () => queryView.whenReady(),
   };
 }

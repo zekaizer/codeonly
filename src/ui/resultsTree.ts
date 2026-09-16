@@ -57,6 +57,9 @@ export function openArgs(node: LineNode): OpenResultArgs {
 export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<ResultNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
+  private readonly resetEmitter = new vscode.EventEmitter<void>();
+  /** Fires when the results are replaced, before the tree change event. */
+  readonly onDidReset = this.resetEmitter.event;
 
   private files = new Map<string, FileNode>();
   private sorted: FileNode[] | undefined;
@@ -71,6 +74,7 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   dispose(): void {
     clearTimeout(this.refreshTimer);
     this.changed.dispose();
+    this.resetEmitter.dispose();
   }
 
   get isEmpty(): boolean {
@@ -97,7 +101,12 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     this.folders = folders;
     this.generation++;
     this.expandAll = false;
+    this.resetEmitter.fire();
     this.refresh();
+  }
+
+  fileFor(uri: vscode.Uri): FileNode | undefined {
+    return uri.scheme === "file" ? this.files.get(uri.fsPath) : undefined;
   }
 
   add(result: FileResult): void {

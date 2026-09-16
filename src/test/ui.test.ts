@@ -150,6 +150,37 @@ suite("search UI", () => {
     assert.equal(api.status().kind, "idle");
   });
 
+  test("code matches are highlighted in open editors, not comment matches", async () => {
+    await vscode.commands.executeCommand("codeonly.results.focus");
+    await api.search({ ...base, pattern: "widget_count" });
+    const uri = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(uri);
+    const spans = () => api.highlightedRanges(uri).map((r) => [r.start.line, r.start.character, r.end.character]);
+    assert.deepEqual(spans(), [
+      [4, 8, 20],
+      [13, 12, 24],
+    ]);
+
+    await editor.edit((b) => b.insert(new vscode.Position(0, 0), "\n"));
+    assert.deepEqual(spans(), []);
+    await vscode.commands.executeCommand("workbench.action.files.revert");
+  });
+
+  test("highlights follow dismissals and clear with the results", async () => {
+    await vscode.commands.executeCommand("codeonly.results.focus");
+    await api.search({ ...base, pattern: "widget_count" });
+    const uri = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    await vscode.window.showTextDocument(uri);
+    const main = fileEntry(await api.resultTree(), "src/main.c");
+    await vscode.commands.executeCommand("codeonly.dismiss", main.children[0].node);
+    assert.deepEqual(
+      api.highlightedRanges(uri).map((r) => r.start.line),
+      [13],
+    );
+    await vscode.commands.executeCommand("codeonly.clear");
+    assert.deepEqual(api.highlightedRanges(uri), []);
+  });
+
   test("an invalid regular expression reports an error", async () => {
     const summary = await api.search({ ...base, pattern: "(", isRegExp: true });
     assert.equal(summary, undefined);
