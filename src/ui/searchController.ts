@@ -216,7 +216,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       },
     }));
 
-    this.tree.reset(folders);
+    this.tree.reset(folders, true);
     this.shownPattern = form.pattern;
     this.setStatus({ kind: "searching", matchCount: 0, fileCount: 0 });
     const progress = setInterval(() => {
@@ -427,7 +427,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let description: string | undefined;
     switch (s.kind) {
       case "searching":
-        message = s.matchCount === 0 ? "Searching…" : undefined;
+        // Old results stay listed until the new ones are shown.
+        message = s.matchCount === 0 && !this.tree.showsResults ? "Searching…" : undefined;
         break;
       case "done":
         message = s.matchCount === 0 ? (s.cancelled ? "Search stopped." : "No results found.") : undefined;

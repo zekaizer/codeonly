@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { FileResult } from "../search/codeSearch";
+import { EMPTY_FORM } from "../shared/protocol";
 import { MatchHighlights } from "../ui/matchHighlights";
 import { ResultsTree } from "../ui/resultsTree";
 import { SearchController } from "../ui/searchController";
@@ -136,34 +137,80 @@ suite("results tree pacing", () => {
     assert.deepEqual(events, [undefined]);
   });
 
+  test("a new search keeps the old results in the view until it has results to show", async () => {
+    tree.add(fileResult(0));
+    tree.flush();
+    tree.getChildren();
+    assert.ok(tree.showsResults);
+    events.length = 0;
+    tree.reset([], true);
+    await sleep(100);
+    assert.deepEqual(events, []);
+    assert.ok(tree.showsResults);
+    tree.add(fileResult(1));
+    tree.flush();
+    assert.deepEqual(events, [undefined]);
+    assert.deepEqual(
+      tree.getChildren().map((f) => (f.kind === "file" ? f.result.relativePath : "")),
+      ["f1.c"],
+    );
+  });
+
+  test("an empty new search shows the empty list after the usual pause", async () => {
+    tree.add(fileResult(0));
+    tree.flush();
+    tree.getChildren();
+    events.length = 0;
+    tree.reset([], true);
+    await sleep(450);
+    assert.deepEqual(events, [undefined]);
+    assert.ok(!tree.showsResults);
+  });
+
 });
 
 suite("results view status", () => {
-  test("an unchanged message is not assigned again, since each assignment delays the tree refresh", () => {
-    let assignments = 0;
+  let messages: (string | undefined)[];
+  let tree: ResultsTree;
+  let controller: SearchController;
+
+  setup(() => {
+    messages = [];
     let message: string | undefined;
     const view = {
       get message() {
         return message;
       },
       set message(value: string | undefined) {
-        assignments++;
+        messages.push(value);
         message = value;
       },
       description: undefined as string | undefined,
     } as unknown as vscode.TreeView<unknown>;
     const state = { get: (_k: string, d?: unknown) => d, update: async () => undefined, keys: () => [] } as unknown as vscode.Memento;
     const log = { info() {}, warn() {}, error() {}, show() {} } as unknown as vscode.LogOutputChannel;
-    const tree = new ResultsTree(() => "alwaysExpand");
-    const controller = new SearchController(state, tree, view, log);
-    try {
-      controller.clear();
-      controller.clear();
-      assert.equal(assignments, 0);
-    } finally {
-      controller.dispose();
-      tree.dispose();
-    }
+    tree = new ResultsTree(() => "alwaysExpand");
+    controller = new SearchController(state, tree, view, log);
+  });
+
+  teardown(() => {
+    controller.dispose();
+    tree.dispose();
+  });
+
+  test("an unchanged message is not assigned again, since each assignment delays the tree refresh", () => {
+    controller.clear();
+    controller.clear();
+    assert.deepEqual(messages, []);
+  });
+
+  test("a search says it is searching only once the view shows no results", async () => {
+    tree.add(fileResult(0));
+    tree.flush();
+    tree.getChildren();
+    const summary = await controller.search({ ...EMPTY_FORM, pattern: "widget_init" }, false);
+    assert.ok(summary && summary.matchCount > 0);
+    assert.ok(!messages.includes("Searching…"), JSON.stringify(messages));
   });
 });
 

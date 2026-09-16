@@ -85,6 +85,7 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
   /** When the view last read the root, and when it last read anything. */
   private rootReadAt = Date.now();
   private lastReadAt = this.rootReadAt;
+  private shownAny = false;
 
   constructor(private readonly collapseMode: () => CollapseMode) {}
 
@@ -112,14 +113,32 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return { fileCount: this.files.size, matchCount, unfilteredFileCount };
   }
 
-  reset(folders: readonly vscode.WorkspaceFolder[]): void {
+  /** Whether the last refresh pushed to the view had results. */
+  get showsResults(): boolean {
+    return this.shownAny;
+  }
+
+  /**
+   * Replaces the results. With `deferred`, the view keeps the old results until the next refresh,
+   * so that a new search does not flash an empty list.
+   */
+  reset(folders: readonly vscode.WorkspaceFolder[], deferred = false): void {
     this.files = new Map();
     this.sorted = undefined;
     this.folders = folders;
     this.generation++;
     this.expandAll = false;
     this.resetEmitter.fire();
-    this.refresh();
+    if (!deferred) {
+      this.refresh();
+      return;
+    }
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
+    this.pending = true;
+    this.awaitingRead = false;
+    this.rootReadAt = this.lastReadAt = Date.now();
+    this.schedule();
   }
 
   fileFor(uri: vscode.Uri): FileNode | undefined {
@@ -151,6 +170,7 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     this.refreshTimer = undefined;
     this.pending = false;
     this.awaitingRead = true;
+    this.shownAny = this.files.size > 0;
     this.changed.fire(undefined);
   }
 
