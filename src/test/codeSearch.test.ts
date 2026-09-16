@@ -351,6 +351,16 @@ suite("code search pipeline edge cases", () => {
     assert.equal(end.summary.matchCount, 4);
   });
 
+  test("a backslash in a Linux file name is part of the name", async function () {
+    if (process.platform === "win32") {
+      this.skip();
+    }
+    const dir = workspace({ "a\\b.c": "int widget_bs; // widget_bs\n", "n\\x.txt": "widget_bs\n" });
+    const o = await run(dir, "widget_bs");
+    assert.deepEqual(shown(o, "a\\b.c"), [1]);
+    assert.equal(o.results.get("n\\x.txt")?.absolutePath, path.join(dir, "n\\x.txt"));
+  });
+
   test("a PCRE2-only escape is not taken for a newline", async () => {
     const dir = workspace({ "a.c": "int widget_nl;\n" });
     assert.deepEqual(shown(await run(dir, "widget\\N", { isRegExp: true }), "a.c"), [1]);

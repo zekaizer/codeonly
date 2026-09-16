@@ -147,7 +147,8 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         folder.path,
         async (file) => {
           sawFile = true;
-          const task = processFile(folder.path, file).then(emit).catch(fail);
+          const relativePath = toRelativePath(file.path);
+          const task = processFile(folder.path, relativePath, file).then(emit).catch(fail);
           pending.add(task);
           void task.finally(() => pending.delete(task));
           if (pending.size >= FILE_CONCURRENCY) {
@@ -196,6 +197,12 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
 
 /** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
 const NEWLINE_ESCAPE = /^(?:n|x0[aA]|x\{0*[aA]\}|u000[aA]|u\{0*[aA]\}|U0000000[aA]|U\{0*[aA]\}|012|o\{0*12\}|c[jJ])/;
+
+/** ripgrep prints paths below `.` with `./`; on Windows its separators are backslashes. */
+function toRelativePath(printed: string): string {
+  const p = process.platform === "win32" ? printed.replace(/\\/g, "/") : printed;
+  return p.replace(/^(\.\/)+/, "");
+}
 
 /**
  * Results are per line, so a pattern that must match a newline would silently find nothing.
@@ -260,8 +267,7 @@ function matchesOf(line: RipgrepLine): readonly Submatch[] {
   return [{ start: end, end }];
 }
 
-async function processFile(folder: string, file: RipgrepFile): Promise<FileResult> {
-  const relativePath = file.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+async function processFile(folder: string, relativePath: string, file: RipgrepFile): Promise<FileResult> {
   const absolutePath = path.join(folder, relativePath);
   const base = { folder, relativePath, absolutePath };
   if (!isCFamilyFile(relativePath)) {
