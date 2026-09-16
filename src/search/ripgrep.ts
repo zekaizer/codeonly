@@ -233,8 +233,10 @@ export interface RipgrepLine {
 }
 
 export interface RipgrepFile {
-  /** Path as printed by ripgrep, relative to the working directory. */
+  /** Path as printed by ripgrep, relative to the working directory. Lossy if the name is not UTF-8. */
   readonly path: string;
+  /** Exact path bytes, present only when the name is not valid UTF-8. */
+  readonly rawPath?: Buffer;
   readonly lines: RipgrepLine[];
 }
 
@@ -315,9 +317,9 @@ export async function runRipgrep(
     for await (const line of splitLines(child.stdout)) {
       const message = parseMessage(line);
       if (message?.type === "begin") {
-        current = { path: decodeData(message.data.path), lines: [] };
+        current = { ...decodePath(message.data.path), lines: [] };
       } else if (message?.type === "match") {
-        current ??= { path: decodeData(message.data.path), lines: [] };
+        current ??= { ...decodePath(message.data.path), lines: [] };
         current.lines.push(toLine(message));
       } else if (message?.type === "end") {
         if (current && current.lines.length > 0 && !signal?.aborted) {
@@ -370,11 +372,15 @@ function parseMessage(line: string): RgMessage | undefined {
   }
 }
 
-function decodeData(data: RgData | undefined): string {
+function decodePath(data: RgData | undefined): Pick<RipgrepFile, "path" | "rawPath"> {
   if (!data) {
-    return "";
+    return { path: "" };
   }
-  return "text" in data ? data.text : Buffer.from(data.bytes, "base64").toString("utf8");
+  if ("text" in data) {
+    return { path: data.text };
+  }
+  const rawPath = Buffer.from(data.bytes, "base64");
+  return { path: rawPath.toString("utf8"), rawPath };
 }
 
 function toLine(message: RgMessage): RipgrepLine {

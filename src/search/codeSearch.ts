@@ -268,9 +268,13 @@ async function processFile(folder: string, file: RipgrepFile): Promise<FileResul
     return { ...base, filtered: false, lines: file.lines.map((l) => toResultLine(l, matchesOf(l))), excluded: [] };
   }
 
+  // A name that is not UTF-8 can only be opened through its bytes.
+  const readPath = file.rawPath
+    ? Buffer.concat([Buffer.from(folder + path.sep), file.rawPath.subarray(file.rawPath.indexOf("./") === 0 ? 2 : 0)])
+    : absolutePath;
   let buf: Buffer;
   try {
-    buf = await fs.promises.readFile(absolutePath);
+    buf = await fs.promises.readFile(readPath);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     return excludeAll(base, file, code ? `${UNREADABLE} (${code})` : UNREADABLE);

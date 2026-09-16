@@ -339,4 +339,19 @@ suite("code search pipeline edge cases", () => {
     assert.equal(end.summary.matchCount, 4);
   });
 
+  test("a file name that is not UTF-8 is still read", async function () {
+    if (process.platform !== "linux") {
+      this.skip();
+    }
+    const dir = workspace({});
+    fs.writeFileSync(Buffer.concat([Buffer.from(`${dir}/caf`), Buffer.from([0xe9]), Buffer.from(".c")]), "int widget_nm; // widget_nm\n");
+    const o = await run(dir, "widget_nm");
+    const [result] = o.results.values();
+    assert.ok(result);
+    assert.deepEqual(
+      result.lines.map((l) => l.lineNumber),
+      [1],
+    );
+    assert.equal(result.lines[0].ranges.length, 1);
+  });
 });
