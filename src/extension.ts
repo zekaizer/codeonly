@@ -100,7 +100,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       controller.resultsChanged();
       if (next && !tree.isEmpty) {
         // The successor may belong to a file added during a search and not yet shown.
-        tree.refresh();
+        tree.flush();
         await treeView.reveal(next, { select: true, focus: false });
         // The reveal waits for the refresh; a new search may have replaced the results meanwhile.
         if (tree.contains(next)) {
@@ -142,7 +142,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     search: (form) => controller.search({ ...controller.currentForm(), ...form }, false, true),
     form: () => controller.currentForm(),
     status: () => controller.currentStatus(),
-    resultTree: async () => tree.getChildren().map(entry),
+    resultTree: async () => tree.roots().map(entry),
     hiddenLineReport: () => controller.hiddenLineReport(),
     highlightedRanges: (uri) => highlights.rangesFor(uri),
     editForm: (form) => controller.onFormChanged({ ...controller.currentForm(), ...form }),

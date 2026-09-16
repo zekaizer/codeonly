@@ -250,7 +250,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (id !== this.runId) {
         return undefined;
       }
-      this.tree.refresh();
+      this.tree.flush();
       this.setStatus({
         kind: "done",
         ...this.tree.counts(),

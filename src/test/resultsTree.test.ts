@@ -49,25 +49,93 @@ suite("results tree items", () => {
   });
 });
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function fileResult(i: number, lineCount = 1): FileResult {
+  return {
+    ...result("needle"),
+    relativePath: `f${i}.c`,
+    absolutePath: `/ws/f${i}.c`,
+    lines: Array.from({ length: lineCount }, (_, n) => ({ lineNumber: n + 1, text: "needle", ranges: [{ start: 0, end: 6 }] })),
+  };
+}
+
 suite("results tree pacing", () => {
+  let tree: ResultsTree;
+  let events: (unknown | undefined)[];
+  let stamps: number[];
+  let sub: vscode.Disposable;
+
+  setup(() => {
+    tree = new ResultsTree(() => "alwaysExpand");
+    events = [];
+    stamps = [];
+    sub = tree.onDidChangeTreeData((e) => {
+      events.push(e);
+      stamps.push(Date.now());
+    });
+  });
+
+  teardown(() => {
+    sub.dispose();
+    tree.dispose();
+  });
+
   test("changes during a search are pushed further apart than VS Code's 200 ms tree debounce", async () => {
-    const tree = new ResultsTree(() => "alwaysExpand");
-    const stamps: number[] = [];
-    const sub = tree.onDidChangeTreeData(() => stamps.push(Date.now()));
+    const read = tree.onDidChangeTreeData(() => tree.getChildren());
     try {
       const started = Date.now();
       for (let i = 0; Date.now() - started < 1200; i++) {
-        tree.add({ ...result(`needle ${i}`), relativePath: `f${i}.c`, absolutePath: `/ws/f${i}.c` });
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        tree.add(fileResult(i));
+        await sleep(20);
       }
       const gaps = stamps.slice(1).map((t, i) => t - stamps[i]);
       assert.ok(stamps.length >= 2, `only ${stamps.length} refreshes`);
       assert.ok(Math.min(...gaps) > 220, JSON.stringify(gaps));
     } finally {
-      sub.dispose();
-      tree.dispose();
+      read.dispose();
     }
   });
+
+  test("no refresh is pushed until the view has read the previous one", async () => {
+    tree.add(fileResult(0));
+    await sleep(400);
+    assert.equal(stamps.length, 1);
+    for (let i = 1; i < 40; i++) {
+      tree.add(fileResult(i));
+      await sleep(20);
+    }
+    assert.equal(stamps.length, 1);
+    tree.getChildren();
+    await sleep(400);
+    assert.equal(stamps.length, 2);
+  });
+
+  test("the pause after a refresh grows with how long the view took to read it", async () => {
+    tree.add(fileResult(0));
+    await sleep(350);
+    assert.equal(stamps.length, 1);
+    const [file] = tree.getChildren();
+    await sleep(500);
+    tree.getChildren(file);
+    const lastRead = Date.now();
+    for (let i = 1; Date.now() - lastRead < 1500; i++) {
+      tree.add(fileResult(i));
+      await sleep(20);
+    }
+    assert.equal(stamps.length, 2);
+    assert.ok(stamps[1] - lastRead >= 950, `${stamps[1] - lastRead} ms after the last read`);
+  });
+
+  test("flush pushes pending results at once, and nothing when none are pending", () => {
+    tree.add(fileResult(0));
+    tree.flush();
+    assert.deepEqual(events, [undefined]);
+    tree.getChildren();
+    tree.flush();
+    assert.deepEqual(events, [undefined]);
+  });
+
 });
 
 suite("results view status", () => {
