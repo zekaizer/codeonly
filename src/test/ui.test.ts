@@ -245,15 +245,31 @@ suite("search UI", () => {
     await api.search({ pattern: "widget_count" });
   });
 
-  test("after dismissing the selected result, next result continues from there", async () => {
+  test("dismissing the selected result opens the next one, and next result continues after it", async () => {
+    const at = () => {
+      const editor = vscode.window.activeTextEditor;
+      return `${path.basename(editor?.document.uri.fsPath ?? "")}:${editor?.selection.active.line}`;
+    };
     await api.search({ ...base, pattern: "widget_init" });
     await vscode.commands.executeCommand("codeonly.nextResult");
-    assert.equal(path.basename(vscode.window.activeTextEditor?.document.uri.fsPath ?? ""), "notes.txt");
+    assert.equal(at(), "notes.txt:0");
     await vscode.commands.executeCommand("codeonly.dismiss");
+    assert.equal(at(), "Makefile:0");
     await vscode.commands.executeCommand("codeonly.nextResult");
-    const editor = vscode.window.activeTextEditor;
-    assert.equal(path.basename(editor?.document.uri.fsPath ?? ""), "Makefile");
-    assert.equal(editor?.selection.active.line, 1);
+    assert.equal(at(), "Makefile:1");
+  });
+
+  test("dismissing the file of the selected result moves to the next file; dismissing the last result is fine", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const notes = fileEntry(await api.resultTree(), "docs/notes.txt");
+    await vscode.commands.executeCommand("codeonly.dismiss", notes.node);
+    assert.equal(path.basename(vscode.window.activeTextEditor?.document.uri.fsPath ?? ""), "Makefile");
+    for (const entry of await api.resultTree()) {
+      await vscode.commands.executeCommand("codeonly.dismiss", entry.node);
+    }
+    assert.deepEqual(await api.resultTree(), []);
+    assert.equal(api.status().kind, "idle");
   });
 
   test("next result reuses an editor group where the file is already visible", async () => {
