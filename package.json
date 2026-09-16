@@ -5,6 +5,14 @@
   "version": "0.0.1",
   "publisher": "zekaizer",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zekaizer/codeonly.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zekaizer/codeonly/issues"
+  },
+  "homepage": "https://github.com/zekaizer/codeonly#readme",
   "engines": {
     "vscode": "^1.136.0"
   },
