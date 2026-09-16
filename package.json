@@ -273,7 +273,7 @@
         "codeonly.diagnostics.logExcludedLines": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Write every hidden result line, with the reason it was hidden, to the **CodeOnly** output channel."
+          "markdownDescription": "List every hidden result line of the last search, with the reason it was hidden, in the **CodeOnly Hidden Lines** output."
         }
       }
     },

@@ -15,13 +15,15 @@ import * as settings from "./ui/settings";
 
 export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const log = vscode.window.createOutputChannel("CodeOnly", { log: true });
+  // A plain channel, which VS Code does not rotate at 5 MB as it does log channels.
+  const hiddenLines = vscode.window.createOutputChannel("CodeOnly Hidden Lines");
   const tree = new ResultsTree(settings.collapseMode);
   const treeView = vscode.window.createTreeView<ResultNode>(RESULTS_VIEW_ID, {
     treeDataProvider: tree,
     showCollapseAll: true,
   });
   const highlights = new MatchHighlights(tree, () => treeView.visible);
-  const controller = new SearchController(context.workspaceState, tree, treeView, log);
+  const controller = new SearchController(context.workspaceState, tree, treeView, log, hiddenLines);
   const queryView = new QueryViewProvider(context.extensionUri, controller);
   controller.view = queryView;
 
@@ -77,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
 
   context.subscriptions.push(
     log,
+    hiddenLines,
     tree,
     treeView,
     highlights,

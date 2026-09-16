@@ -38,6 +38,8 @@ export interface ViewChannel {
   focusInput(): void;
 }
 
+export type HiddenLinesOutput = Pick<vscode.OutputChannel, "replace" | "show">;
+
 interface HiddenLine {
   readonly location: string;
   readonly lineNumber: number;
@@ -65,6 +67,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     private readonly tree: ResultsTree,
     private readonly treeView: vscode.TreeView<unknown>,
     private readonly log: vscode.LogOutputChannel,
+    private readonly hiddenLines: HiddenLinesOutput,
   ) {
     this.form = { ...EMPTY_FORM, ...state.get<Partial<QueryForm>>(FORM_KEY) };
     this.history = state.get<string[]>(HISTORY_KEY, []);
@@ -499,10 +502,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
     hidden.sort((a, b) => a.location.localeCompare(b.location) || a.lineNumber - b.lineNumber);
     this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${makePreview(h.text, []).label}`);
-    this.log.info(`Hidden lines for "${form.pattern}" (${hidden.length}):`);
-    for (const line of this.report) {
-      this.log.info(`  ${line}`);
-    }
+    this.hiddenLines.replace([`Hidden lines for "${form.pattern}" (${hidden.length}):`, ...this.report, ""].join("\n"));
   }
 
   private async showHiddenLines(): Promise<void> {
@@ -511,12 +511,12 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (this.report.length === 0 && this.status.kind === "done" && this.status.hiddenLineCount > 0) {
         await this.rerun();
       }
-      this.log.show(true);
+      this.hiddenLines.show(true);
       return;
     }
     const enable = "Enable and Search Again";
     const choice = await vscode.window.showInformationMessage(
-      "Hidden lines are written to the CodeOnly output only while 'codeonly.diagnostics.logExcludedLines' is on.",
+      "Hidden lines are listed in the CodeOnly Hidden Lines output only while 'codeonly.diagnostics.logExcludedLines' is on.",
       enable,
     );
     if (choice === enable) {
@@ -524,7 +524,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
         .getConfiguration("codeonly")
         .update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
       await this.rerun();
-      this.log.show(true);
+      this.hiddenLines.show(true);
     }
   }
 }

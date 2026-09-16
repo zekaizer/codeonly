@@ -80,14 +80,14 @@ CodeOnly Search follows your existing search settings, including
 
 | Setting | Default | |
 |---|---|---|
-| `codeonly.diagnostics.logExcludedLines` | off | List every hidden line, and why it was hidden, in the **CodeOnly** output |
+| `codeonly.diagnostics.logExcludedLines` | off | List every hidden line of the last search, and why it was hidden, in the **CodeOnly Hidden Lines** output |
 | `codeonly.ripgrepPath` | empty | Path to a `rg` executable to use instead of the one that comes with VS Code |
 
 ## Troubleshooting
 
 **A line I expected is missing.** Click *comment-only lines hidden* under the
 search box. It turns on `codeonly.diagnostics.logExcludedLines` if needed and
-shows each hidden line with its reason in the **CodeOnly** output.
+shows each hidden line with its reason in the **CodeOnly Hidden Lines** output.
 
 **"ripgrep was not found".** CodeOnly Search uses the search engine that comes
 with VS Code. If it cannot be found, install

@@ -203,6 +203,8 @@ suite("results tree pacing", () => {
 
 suite("results view status", () => {
   let messages: (string | undefined)[];
+  let logged: string[];
+  let hiddenReports: string[];
   let tree: ResultsTree;
   let controller: SearchController;
 
@@ -220,9 +222,17 @@ suite("results view status", () => {
       description: undefined as string | undefined,
     } as unknown as vscode.TreeView<unknown>;
     const state = { get: (_k: string, d?: unknown) => d, update: async () => undefined, keys: () => [] } as unknown as vscode.Memento;
-    const log = { info() {}, warn() {}, error() {}, show() {} } as unknown as vscode.LogOutputChannel;
+    logged = [];
+    hiddenReports = [];
+    const log = {
+      info: (m: string) => logged.push(m),
+      warn: (m: string) => logged.push(m),
+      error() {},
+      show() {},
+    } as unknown as vscode.LogOutputChannel;
+    const hiddenLines = { replace: (text: string) => hiddenReports.push(text), show() {} };
     tree = new ResultsTree(() => "alwaysExpand");
-    controller = new SearchController(state, tree, view, log);
+    controller = new SearchController(state, tree, view, log, hiddenLines);
   });
 
   teardown(() => {
@@ -243,6 +253,21 @@ suite("results view status", () => {
     const summary = await controller.search({ ...EMPTY_FORM, pattern: "widget_init" }, false);
     assert.ok(summary && summary.matchCount > 0);
     assert.ok(!messages.includes("Searching…"), JSON.stringify(messages));
+  });
+
+  test("hidden lines go to their own output, replaced on each search, not to the rotating log", async () => {
+    const config = vscode.workspace.getConfiguration("codeonly");
+    await config.update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
+    try {
+      await controller.search({ ...EMPTY_FORM, isCaseSensitive: true, pattern: "widget_init" }, false);
+      await controller.search({ ...EMPTY_FORM, isCaseSensitive: true, pattern: "widget_count" }, false);
+    } finally {
+      await config.update("diagnostics.logExcludedLines", undefined, vscode.ConfigurationTarget.Global);
+    }
+    assert.equal(hiddenReports.length, 2);
+    assert.match(hiddenReports[1], /^Hidden lines for "widget_count" \(\d+\):\n/);
+    assert.match(hiddenReports[1], /src\/main\.c:\d+ {2}\[comment-only match\]/);
+    assert.ok(!logged.some((l) => l.includes("[comment-only match]")), logged.join("\n"));
   });
 });
 
