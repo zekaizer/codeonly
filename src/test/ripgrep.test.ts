@@ -100,6 +100,11 @@ suite("ripgrep arguments", () => {
     ]);
   });
 
+  test("\\u escapes are rewritten for PCRE2, as VS Code does", () => {
+    const args = buildRipgrepArgs(query("\\u0066oo\\u{0062}(?=;)\\\\u0041", { isRegExp: true }), folder);
+    assert.equal(valueAfter(args, "--regexp"), "\\x{0066}oo\\x{0062}(?=;)\\\\u0041");
+  });
+
   test("folder-relative includes list every parent so ripgrep can prune other directories", () => {
     const args = buildRipgrepArgs(
       query("foo", { includes: ["drivers/{gpu,media}", "drivers/{gpu,media}/**", "fs/ext4/*.c", "fs/ext4/*.c/**"] }),

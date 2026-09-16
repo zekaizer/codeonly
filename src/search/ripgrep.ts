@@ -42,14 +42,16 @@ export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): st
     args.push("--follow");
   }
   args.push("--crlf");
+  let pattern = query.pattern;
   if (query.isRegExp) {
+    pattern = unicodeEscapesToPcre2(pattern);
     args.push("--engine", "auto");
   }
   let literal: string | undefined;
   if (query.isWordMatch) {
-    args.push("--regexp", wholeWordRegExp(query.pattern, query.isRegExp));
+    args.push("--regexp", wholeWordRegExp(pattern, query.isRegExp));
   } else if (query.isRegExp) {
-    args.push("--regexp", query.pattern);
+    args.push("--regexp", pattern);
   } else {
     args.push("--fixed-strings");
     literal = query.pattern;
@@ -76,6 +78,16 @@ function isCaseSensitive(query: SearchQuery, smartCase: boolean): boolean {
   }
   const text = query.isRegExp ? query.pattern.replace(/\\./g, "") : query.pattern;
   return text.toLowerCase() !== text;
+}
+
+/** PCRE2, the fallback engine, has no `\u` escape; VS Code rewrites `\uXXXX` and `\u{XXXX}` to `\x{XXXX}`. */
+function unicodeEscapesToPcre2(pattern: string): string {
+  for (const re of [/((?:[^\\]|^)(?:\\\\)*)\\u([a-z0-9]{4})/gi, /((?:[^\\]|^)(?:\\\\)*)\\u\{([a-z0-9]{4})\}/gi]) {
+    while (pattern.match(re)) {
+      pattern = pattern.replace(re, "$1\\x{$2}");
+    }
+  }
+  return pattern;
 }
 
 function wholeWordRegExp(pattern: string, isRegExp: boolean): string {

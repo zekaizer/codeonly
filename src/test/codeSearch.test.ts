@@ -375,6 +375,11 @@ suite("code search pipeline edge cases", () => {
     assert.equal(o.results.get("n\\x.txt")?.absolutePath, path.join(dir, "n\\x.txt"));
   });
 
+  test("a \\u escape works together with PCRE2-only syntax", async () => {
+    const dir = workspace({ "a.c": "int widget_u(void);\n" });
+    assert.deepEqual(shown(await run(dir, "widget_\\u0075(?=\\()", { isRegExp: true }), "a.c"), [1]);
+  });
+
   test("a PCRE2-only escape is not taken for a newline", async () => {
     const dir = workspace({ "a.c": "int widget_nl;\n" });
     assert.deepEqual(shown(await run(dir, "widget\\N", { isRegExp: true }), "a.c"), [1]);
