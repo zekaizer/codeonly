@@ -54,6 +54,15 @@ suite("glob matching (VS Code semantics)", () => {
     assert.ok(matches("a+b(c).c", "a+b(c).c"));
   });
 
+  test("a glob that cannot be compiled is dropped, as VS Code does", () => {
+    const matcher = compileGlobs(["[b-a].c", "*.c"], false);
+    assert.ok(matcher);
+    assert.ok(matcher("x.c"));
+    const none = compileGlobs(["[b-a].c"], false);
+    assert.ok(none);
+    assert.ok(!none("b.c"));
+  });
+
   test("any of several globs, optionally ignoring case", () => {
     const matcher = compileGlobs(["src/**/*.c", "**/Makefile"], false);
     assert.ok(matcher);

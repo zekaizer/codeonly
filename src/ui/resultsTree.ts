@@ -222,7 +222,13 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     item.accessibilityInformation = {
       label: `${preview.label}, line ${line.lineNumber} in ${node.file.result.relativePath}`,
     };
-    item.command = { command: "codeonly.openResult", title: "Open Result", arguments: [openArgs(node)] };
+    // vscode.open lets the tree apply the gesture: preview on click, pin on double-click, side by side with Ctrl/Alt.
+    const args = openArgs(node);
+    item.command = {
+      command: "vscode.open",
+      title: "Open Result",
+      arguments: [vscode.Uri.file(args.path), { selection: new vscode.Range(args.line - 1, args.start, args.line - 1, args.end) }],
+    };
     return item;
   }
 

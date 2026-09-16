@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { CodeOnlyApi, ResultEntry } from "../api";
 import { EMPTY_FORM } from "../shared/protocol";
+import { folderOptions } from "../ui/settings";
 
 const FIXTURE = path.resolve(__dirname, "../../test-fixtures/workspace");
 
@@ -206,14 +207,13 @@ suite("search UI", () => {
     }
   });
 
-  test("opening the same result twice keeps the editor and moves focus to it", async () => {
+  test("results open through vscode.open, so VS Code applies the click or key gesture", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const command = fileEntry(await api.resultTree(), "src/main.c").children[1].item.command;
-    assert.ok(command);
-    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
-    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, true);
-    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
-    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, false);
+    assert.equal(command?.command, "vscode.open");
+    const [uri, options] = (command?.arguments ?? []) as [vscode.Uri, vscode.TextDocumentShowOptions];
+    assert.equal(uri.fsPath, path.join(FIXTURE, "src/main.c"));
+    assert.deepEqual(options, { selection: new vscode.Range(13, 12, 13, 24) });
   });
 
   test("errors point at the field they are about", async () => {
@@ -251,6 +251,52 @@ suite("search UI", () => {
     const main = fileEntry(await api.resultTree(), "src/main.c");
     assert.match(String(main.item.description), /^src\b/);
     await api.search({ includes: "" });
+  });
+
+  test("search paths that do not exist are dropped, and an error names one if none exist", async () => {
+    const some = await api.search({ ...base, pattern: "widget_init", includes: "../codeonly-no-such-dir, ./src" });
+    assert.equal(some?.fileCount, 1);
+    assert.equal(await api.search({ ...base, pattern: "widget_init", includes: "/codeonly/no/such/dir" }), undefined);
+    const status = api.status();
+    assert.equal(status.kind, "error");
+    if (status.kind === "error") {
+      assert.equal(status.message, "Search path not found: /codeonly/no/such/dir");
+      assert.equal(status.field, "includes");
+    }
+    await api.search({ includes: "" });
+  });
+
+  test("a file path in include searches that file", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: path.join(FIXTURE, "src", "main.c") });
+    assert.equal(summary?.fileCount, 1);
+    assert.ok(fileEntry(await api.resultTree(), "src/main.c"));
+    await api.search({ includes: "" });
+  });
+
+  test("an invalid range in an include glob is reported as a file pattern error", async () => {
+    await api.search({ ...base, pattern: "widget_init", includes: "[b-a].c" });
+    const status = api.status();
+    assert.equal(status.kind, "error");
+    if (status.kind === "error") {
+      assert.match(status.message, /^Invalid file pattern/);
+      assert.equal(status.field, "includes");
+    }
+    await api.search({ includes: "" });
+  });
+
+  test("search.exclude false overrides files.exclude true", async () => {
+    const files = vscode.workspace.getConfiguration("files");
+    const search = vscode.workspace.getConfiguration("search");
+    await files.update("exclude", { "**/docs": true }, vscode.ConfigurationTarget.Global);
+    await search.update("exclude", { "**/docs": false }, vscode.ConfigurationTarget.Global);
+    try {
+      assert.ok(!folderOptions(vscode.Uri.file(FIXTURE)).excludes.includes("**/docs"));
+      await api.search({ ...base, pattern: "widget_init" });
+      assert.ok(fileEntry(await api.resultTree(), "docs/notes.txt"));
+    } finally {
+      await files.update("exclude", undefined, vscode.ConfigurationTarget.Global);
+      await search.update("exclude", undefined, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test("dismiss removes a result and clear removes all", async () => {

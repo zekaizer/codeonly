@@ -111,11 +111,6 @@
         "icon": "$(output)"
       },
       {
-        "command": "codeonly.openResult",
-        "title": "Open Result",
-        "category": "CodeOnly"
-      },
-      {
         "command": "codeonly.openToSide",
         "title": "Open to the Side",
         "category": "CodeOnly"
@@ -212,10 +207,6 @@
       "commandPalette": [
         {
           "command": "codeonly.findInFolder",
-          "when": "false"
-        },
-        {
-          "command": "codeonly.openResult",
           "when": "false"
         },
         {

@@ -1,10 +1,11 @@
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import type { SearchQuery } from "../search/query";
+import { type SearchQuery, escapeGlob } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
-import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
+import { ScopeError, type ScopedFolder, deepestRoot, resolveScope, searchPathFor } from "../search/scope";
 import {
   EMPTY_FORM,
   type FormField,
@@ -172,6 +173,15 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       return undefined;
     }
 
+    const searchable = await existingRoots(scoped);
+    if (id !== this.runId) {
+      return undefined;
+    }
+    if (scoped.length > 0 && searchable.length === 0) {
+      this.fail(`Search path not found: ${scoped[0].path}`, undefined, "includes");
+      return undefined;
+    }
+
     const abort = new AbortController();
     this.abort = abort;
     const logHidden = settings.logExcludedLines();
@@ -181,7 +191,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     let hiddenLineCount = 0;
     const multiRoot = folders.length > 1;
     const names = new Map(folders.map((f) => [f.uri.fsPath, f.name]));
-    const targets: SearchTarget[] = scoped.map((scope) => ({
+    const targets: SearchTarget[] = searchable.map((scope) => ({
       folder: { path: scope.path, options: settings.folderOptions(vscode.Uri.file(scope.path)) },
       query: {
         pattern: form.pattern,
@@ -494,6 +504,23 @@ interface SearchTarget {
   readonly query: SearchQuery;
 }
 
+/**
+ * Keeps the roots that exist, as VS Code does. A file becomes its folder with an include for
+ * just that file, since ripgrep cannot run inside a file.
+ */
+async function existingRoots(scoped: readonly ScopedFolder[]): Promise<ScopedFolder[]> {
+  const out: ScopedFolder[] = [];
+  for (const scope of scoped) {
+    const stat = await fs.promises.stat(scope.path).catch(() => undefined);
+    if (stat?.isDirectory()) {
+      out.push(scope);
+    } else if (stat?.isFile()) {
+      out.push({ path: path.dirname(scope.path), includes: [escapeGlob(path.basename(scope.path))], excludes: scope.excludes });
+    }
+  }
+  return out;
+}
+
 /** Folders are searched one by one because multi-root include scoping gives each its own query. */
 async function searchTargets(
   rgPath: string,
@@ -504,6 +531,7 @@ async function searchTargets(
   skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
+  const roots = targets.map((t) => t.folder.path);
   for (const { folder, query } of targets) {
     const remaining = maxResults === undefined ? undefined : maxResults - (total?.matchCount ?? 0);
     const summary = await searchCode({
@@ -512,7 +540,8 @@ async function searchTargets(
       folders: [folder],
       maxResults: remaining,
       signal,
-      skip,
+      // A hit below a more specific searched root belongs to that root's run.
+      skip: (file) => skip(file) || deepestRoot(file, roots) !== folder.path,
       onResult,
     });
     total = total ? merge(total, summary) : summary;
@@ -564,15 +593,15 @@ function relativeToWorkspace(result: FileResult, folders: readonly vscode.Worksp
   if (folders.some((f) => f.uri.fsPath === result.folder)) {
     return result;
   }
-  const owner = folders.find((f) => {
-    const rel = path.relative(f.uri.fsPath, result.absolutePath);
-    return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-  });
+  const owner = deepestRoot(
+    result.absolutePath,
+    folders.map((f) => f.uri.fsPath),
+  );
   if (!owner) {
     return result;
   }
-  const relativePath = path.relative(owner.uri.fsPath, result.absolutePath).split(path.sep).join("/");
-  return { ...result, folder: owner.uri.fsPath, relativePath };
+  const relativePath = path.relative(owner, result.absolutePath).split(path.sep).join("/");
+  return { ...result, folder: owner, relativePath };
 }
 
 function seedFromEditor(isRegExp: boolean): string | undefined {

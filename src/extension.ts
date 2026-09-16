@@ -21,18 +21,12 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
   const target = (node: unknown): ResultNode | undefined =>
     isResultNode(node) ? node : treeView.selection[0];
 
-  // Like the Search view: opening previews the match and keeps focus in the results; opening the
-  // same match again (a double-click, or Enter twice) keeps the editor and moves focus to it.
   const open = async (args: OpenResultArgs, sideBySide = false) => {
     const line = args.line - 1;
-    const selection = new vscode.Range(line, args.start, line, args.end);
-    const active = vscode.window.activeTextEditor;
-    const again = active?.document.uri.fsPath === args.path && active.selection.isEqual(selection);
-    const keep = sideBySide || again;
     await vscode.window.showTextDocument(vscode.Uri.file(args.path), {
-      selection,
-      preview: !keep,
-      preserveFocus: !keep,
+      selection: new vscode.Range(line, args.start, line, args.end),
+      preview: !sideBySide,
+      preserveFocus: !sideBySide,
       viewColumn: sideBySide ? vscode.ViewColumn.Beside : undefined,
     });
     controller.remember(controller.currentForm().pattern);
@@ -59,6 +53,12 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     highlights,
     controller,
     treeView.onDidChangeVisibility(() => highlights.update()),
+    // Opening a result is the Search view's cue to keep the term in history.
+    treeView.onDidChangeSelection((e) => {
+      if (e.selection.some((node) => node.kind === "line")) {
+        controller.remember(controller.currentForm().pattern);
+      }
+    }),
     vscode.window.registerWebviewViewProvider(QUERY_VIEW_ID, queryView),
     vscode.commands.registerCommand("codeonly.focusSearch", (options?: { seed?: boolean }) =>
       controller.focusSearch(options),
@@ -74,7 +74,6 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
     vscode.commands.registerCommand("codeonly.showLog", () => log.show(true)),
     vscode.commands.registerCommand("codeonly.nextResult", () => step(1)),
     vscode.commands.registerCommand("codeonly.previousResult", () => step(-1)),
-    vscode.commands.registerCommand("codeonly.openResult", (args: OpenResultArgs) => open(args)),
     vscode.commands.registerCommand("codeonly.openToSide", (node?: unknown) => {
       const n = target(node);
       if (n?.kind === "line") {
