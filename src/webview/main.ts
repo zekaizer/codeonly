@@ -167,11 +167,17 @@ for (const input of [pattern, includes, excludes]) {
     edited();
   });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.isComposing) {
+    if (e.isComposing) {
+      return;
+    }
+    if (e.key === "Enter") {
       e.preventDefault();
       searchNow(true);
     } else if (e.key === "Escape") {
       post({ type: "cancel" });
+    } else if (e.key === "ArrowDown" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      post({ type: "command", command: "focusResults" });
     }
   });
 }
