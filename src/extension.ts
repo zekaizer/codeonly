@@ -87,11 +87,19 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
       }
       return undefined;
     }),
-    vscode.commands.registerCommand("codeonly.dismiss", (node?: unknown) => {
+    vscode.commands.registerCommand("codeonly.dismiss", async (node?: unknown) => {
       const n = target(node);
-      if (n) {
-        tree.dismiss(n);
-        controller.resultsChanged();
+      if (!n) {
+        return;
+      }
+      // Like the Search view, keep the place in the list when the selected result goes away.
+      const selected = treeView.selection[0];
+      const holdsSelection = selected === n || (n.kind === "file" && selected?.kind === "line" && selected.file === n);
+      const next = holdsSelection ? tree.successor(n) : undefined;
+      tree.dismiss(n);
+      controller.resultsChanged();
+      if (next && !tree.isEmpty) {
+        await treeView.reveal(next, { select: true, focus: false });
       }
     }),
     vscode.commands.registerCommand("codeonly.copy", (node?: unknown) => {

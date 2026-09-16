@@ -173,6 +173,17 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     return lines[(index + lines.length) % lines.length];
   }
 
+  /** The line to select once `node` is dismissed: the next one after it, else the one before. */
+  successor(node: ResultNode): LineNode | undefined {
+    const lines = this.roots().flatMap((f) => f.lines);
+    const own = node.kind === "file" ? node.lines : [node];
+    const first = lines.indexOf(own[0]);
+    if (first < 0) {
+      return undefined;
+    }
+    return lines[lines.indexOf(own[own.length - 1]) + 1] ?? lines[first - 1];
+  }
+
   getChildren(node?: ResultNode): ResultNode[] {
     if (!node) {
       return this.roots();
