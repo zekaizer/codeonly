@@ -23,11 +23,14 @@ export function activate(context: vscode.ExtensionContext): CodeOnlyApi {
 
   const open = async (args: OpenResultArgs, sideBySide = false) => {
     const line = args.line - 1;
-    await vscode.window.showTextDocument(vscode.Uri.file(args.path), {
+    const uri = vscode.Uri.file(args.path);
+    // Like a click in the tree, reveal the file where it is already visible.
+    const visible = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
+    await vscode.window.showTextDocument(uri, {
       selection: new vscode.Range(line, args.start, line, args.end),
       preview: !sideBySide,
       preserveFocus: !sideBySide,
-      viewColumn: sideBySide ? vscode.ViewColumn.Beside : undefined,
+      viewColumn: sideBySide ? vscode.ViewColumn.Beside : visible?.viewColumn,
     });
     controller.remember(controller.currentForm().pattern);
   };

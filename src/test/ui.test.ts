@@ -231,6 +231,21 @@ suite("search UI", () => {
     await api.search({ excludes: "" });
   });
 
+  test("next result reuses an editor group where the file is already visible", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    const main = vscode.Uri.file(path.join(FIXTURE, "src/main.c"));
+    await vscode.window.showTextDocument(main, { viewColumn: vscode.ViewColumn.Two, preview: false });
+    await vscode.window.showTextDocument(vscode.Uri.file(path.join(FIXTURE, "Makefile")), {
+      viewColumn: vscode.ViewColumn.One,
+      preview: false,
+    });
+    await vscode.commands.executeCommand("codeonly.nextResult");
+    const editors = vscode.window.visibleTextEditors.filter((e) => e.document.uri.fsPath === main.fsPath);
+    assert.equal(editors.length, 1);
+    assert.equal(editors[0].viewColumn, vscode.ViewColumn.Two);
+    assert.equal(editors[0].selection.active.line, 4);
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");
