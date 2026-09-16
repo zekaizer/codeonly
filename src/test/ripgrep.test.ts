@@ -86,6 +86,7 @@ suite("ripgrep arguments", () => {
       { ...folder, excludes: ["**/.git", "out", "/abs/"] },
     );
     assert.deepEqual(globs(args), [
+      "!*",
       "/drivers",
       "/drivers/**",
       "**/*.c",
@@ -96,6 +97,24 @@ suite("ripgrep arguments", () => {
       "!**/build",
       "!**/build/**",
     ]);
+  });
+
+  test("folder-relative includes list every parent so ripgrep can prune other directories", () => {
+    const args = buildRipgrepArgs(query("foo", { includes: ["./drivers/{gpu,media}/", "./fs/ext4/*.c"] }), folder);
+    assert.deepEqual(globs(args), [
+      "!*",
+      "/drivers",
+      "/drivers/gpu",
+      "/drivers/media",
+      "/drivers/gpu/**",
+      "/drivers/media/**",
+      "/fs",
+      "/fs/ext4",
+      "/fs/ext4/*.c",
+      "/fs/ext4/*.c/**",
+      "!**/.git",
+    ]);
+    assert.ok(!globs(buildRipgrepArgs(query("foo", { includes: ["*.c"] }), folder)).includes("!*"));
   });
 
   test("ignore-file and symlink settings", () => {

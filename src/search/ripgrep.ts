@@ -12,14 +12,23 @@ import type { FolderOptions, SearchQuery } from "./query";
 export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): string[] {
   const args = ["--hidden", "--no-require-git"];
   args.push(isCaseSensitive(query, options.smartCase) ? "--case-sensitive" : "--ignore-case");
-  for (const glob of unique(query.includes.flatMap(expandSearchGlob))) {
+  const includes = unique(query.includes.flatMap(expandSearchGlob));
+  const rooted = includes.filter((g) => !g.startsWith("**"));
+  if (rooted.length > 0) {
+    // Exclude everything, then re-include each folder on the way down, as VS Code does.
+    args.push("-g", "!*");
+    for (const glob of unique(rooted.flatMap(expandBraces).flatMap(pathPrefixes))) {
+      args.push("-g", anchorGlob(glob));
+    }
+  }
+  for (const glob of includes.filter((g) => g.startsWith("**"))) {
     args.push("-g", glob);
   }
-  for (const glob of options.excludes.map(anchorSettingGlob)) {
-    args.push("-g", `!${glob}`);
+  for (const glob of options.excludes) {
+    args.push("-g", `!${anchorGlob(trimTrailingSlashes(glob.replace(/\\/g, "/")))}`);
   }
   for (const glob of unique(query.excludes.flatMap(expandSearchGlob))) {
-    args.push("-g", `!${glob}`);
+    args.push("-g", `!${anchorGlob(glob)}`);
   }
   if (!options.useIgnoreFiles) {
     args.push("--no-ignore");
@@ -77,23 +86,80 @@ function wholeWordRegExp(pattern: string, isRegExp: boolean): string {
   return source;
 }
 
-/** Setting keys are folder-relative globs; ripgrep needs a leading `/` to anchor them. */
-function anchorSettingGlob(glob: string): string {
-  const g = trimTrailingSlashes(glob.replace(/\\/g, "/"));
-  return g.startsWith("**") || g.startsWith("/") ? g : `/${g}`;
+/** Folder-relative globs need a leading `/` to be anchored by ripgrep. */
+function anchorGlob(glob: string): string {
+  return glob.startsWith("**") || glob.startsWith("/") ? glob : `/${glob}`;
 }
 
-/** `./dir` is folder-relative; anything else matches at any depth, as in the Search view. */
+/**
+ * Expands a Search view glob into folder-relative globs: `./dir` and `/dir` stay relative to the
+ * folder, anything else matches at any depth. Each also matches everything below it.
+ */
 function expandSearchGlob(input: string): string[] {
   const glob = trimTrailingSlashes(input.replace(/\\/g, "/"));
-  if (glob.startsWith("./") || glob === ".") {
-    const rel = glob.slice(2).replace(/^\/+/, "");
-    return rel ? [`/${rel}`, `/${rel}/**`] : [];
-  }
-  if (glob.startsWith("/")) {
-    return [glob, `${glob}/**`];
+  if (glob.startsWith("./") || glob === "." || glob.startsWith("/")) {
+    const rel = glob.replace(/^\.?\/*/, "");
+    return rel ? [rel, `${rel}/**`] : [];
   }
   return [`**/${glob}`, `**/${glob}/**`].map((g) => g.replace(/\*\*\/\*\*/g, "**"));
+}
+
+/** `a/b/c` → `a`, `a/b`, `a/b/c`, splitting only outside `{}` and `[]`. */
+function pathPrefixes(glob: string): string[] {
+  const parts = splitOutsideGroups(glob, "/");
+  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+}
+
+/** Expands `{a,b}` groups, as VS Code does before listing include prefixes. */
+function expandBraces(glob: string): string[] {
+  const open = glob.indexOf("{");
+  if (open < 0) {
+    return [glob];
+  }
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < glob.length && close < 0; i++) {
+    if (glob[i] === "{") {
+      depth++;
+    } else if (glob[i] === "}" && --depth === 0) {
+      close = i;
+    }
+  }
+  if (close < 0) {
+    return [glob];
+  }
+  const head = glob.slice(0, open);
+  const alternatives = splitOutsideGroups(glob.slice(open + 1, close), ",");
+  const tails = expandBraces(glob.slice(close + 1));
+  return (alternatives.length > 0 ? alternatives : [""]).flatMap((a) => tails.map((t) => head + a + t));
+}
+
+function splitOutsideGroups(text: string, separator: string): string[] {
+  const out: string[] = [];
+  let braces = 0;
+  let brackets = false;
+  let current = "";
+  for (const ch of text) {
+    if (ch === separator && braces === 0 && !brackets) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    if (ch === "{") {
+      braces++;
+    } else if (ch === "}" && braces > 0) {
+      braces--;
+    } else if (ch === "[") {
+      brackets = true;
+    } else if (ch === "]") {
+      brackets = false;
+    }
+    current += ch;
+  }
+  if (current) {
+    out.push(current);
+  }
+  return out;
 }
 
 function trimTrailingSlashes(glob: string): string {

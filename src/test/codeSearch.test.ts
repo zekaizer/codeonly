@@ -161,6 +161,12 @@ suite("code search pipeline", () => {
 
   test("include and exclude globs", async () => {
     assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./src"] })), ["src/main.c"]);
+    // Same file set as the built-in Search view: a folder-relative include prunes other folders.
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./src", "*.txt"] })), ["src/main.c"]);
+    assert.deepEqual(filesWithLines(await search("widget_init", { includes: ["./docs", "Makefile"] })), [
+      "Makefile",
+      "docs/notes.txt",
+    ]);
     assert.deepEqual(filesWithLines(await search("widget_init", { excludes: ["*.txt", "Makefile"] })), ["src/main.c"]);
   });
 
