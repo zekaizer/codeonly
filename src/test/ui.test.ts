@@ -253,6 +253,26 @@ suite("search UI", () => {
     await api.search({ includes: "" });
   });
 
+  test("search paths that do not exist are dropped, and an error names one if none exist", async () => {
+    const some = await api.search({ ...base, pattern: "widget_init", includes: "../codeonly-no-such-dir, ./src" });
+    assert.equal(some?.fileCount, 1);
+    assert.equal(await api.search({ ...base, pattern: "widget_init", includes: "/codeonly/no/such/dir" }), undefined);
+    const status = api.status();
+    assert.equal(status.kind, "error");
+    if (status.kind === "error") {
+      assert.equal(status.message, "Search path not found: /codeonly/no/such/dir");
+      assert.equal(status.field, "includes");
+    }
+    await api.search({ includes: "" });
+  });
+
+  test("a file path in include searches that file", async () => {
+    const summary = await api.search({ ...base, pattern: "widget_init", includes: path.join(FIXTURE, "src", "main.c") });
+    assert.equal(summary?.fileCount, 1);
+    assert.ok(fileEntry(await api.resultTree(), "src/main.c"));
+    await api.search({ includes: "" });
+  });
+
   test("dismiss removes a result and clear removes all", async () => {
     await api.search({ ...base, pattern: "widget_init" });
     const main = fileEntry(await api.resultTree(), "src/main.c");
