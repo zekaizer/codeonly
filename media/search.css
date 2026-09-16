@@ -128,7 +128,8 @@ body {
   width: 20px;
   height: 22px;
   padding: 0;
-  border: none;
+  box-sizing: border-box;
+  border: 1px solid transparent;
   border-radius: 3px;
   background: transparent;
   color: var(--vscode-icon-foreground, var(--vscode-foreground));
@@ -140,6 +141,15 @@ body {
 
 .icon-button:hover {
   background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* High-contrast themes define no hover backgrounds; the Search view uses a dashed outline there. */
+body.vscode-high-contrast .toggle:hover,
+body.vscode-high-contrast .icon-button:hover,
+body.vscode-high-contrast-light .toggle:hover,
+body.vscode-high-contrast-light .icon-button:hover {
+  border-style: dashed;
+  border-color: var(--vscode-focusBorder);
 }
 
 .icon-button[aria-expanded="true"] {
