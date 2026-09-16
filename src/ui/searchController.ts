@@ -224,7 +224,9 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (id !== this.runId) {
         return undefined;
       }
-      this.ripgrep = undefined;
+      if (!(e instanceof SearchError) || e.ripgrepFailed) {
+        this.ripgrep = undefined;
+      }
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof SearchError) {
         this.fail(message);

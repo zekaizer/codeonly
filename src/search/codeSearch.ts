@@ -74,6 +74,8 @@ export class SearchError extends Error {
     message: string,
     /** Diagnostic text for the log, e.g. ripgrep's stderr. */
     readonly detail?: string,
+    /** The ripgrep executable could not be started; the query itself may be fine. */
+    readonly ripgrepFailed = false,
   ) {
     super(message);
   }
@@ -162,7 +164,11 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
     if (e instanceof SearchError) {
       throw e;
     }
-    throw new SearchError(`Search failed: ${e instanceof Error ? e.message : String(e)}`);
+    const message = e instanceof Error ? e.message : String(e);
+    if ((e as NodeJS.ErrnoException).syscall?.startsWith("spawn")) {
+      throw new SearchError(`Could not run ripgrep: ${message}`, message, true);
+    }
+    throw new SearchError(`Search failed: ${message}`, e instanceof Error ? e.stack : message);
   } finally {
     signal?.removeEventListener("abort", forwardAbort);
   }

@@ -194,6 +194,19 @@ suite("code search pipeline", () => {
     assert.equal(escaped.summary.matchCount, 0);
   });
 
+  test("query errors and ripgrep failures are told apart", async () => {
+    await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => e instanceof SearchError && !e.ripgrepFailed);
+    await assert.rejects(
+      searchCode({
+        rgPath: "/nonexistent/rg",
+        query: { pattern: "x", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+        folders: [{ path: FIXTURE, options }],
+        onResult: () => undefined,
+      }),
+      (e: unknown) => e instanceof SearchError && e.ripgrepFailed === true && /ripgrep/.test(e.message),
+    );
+  });
+
   test("an aborted search reports cancellation", async () => {
     const controller = new AbortController();
     controller.abort();
