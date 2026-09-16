@@ -51,6 +51,8 @@ export interface SearchRequest {
   /** Upper bound on shown matches; undefined for no bound. */
   readonly maxResults?: number;
   readonly signal?: AbortSignal;
+  /** Files for which this returns true are ignored: not read, reported, or counted. */
+  readonly skip?: (absolutePath: string) => boolean;
   /** Called once per file that had matches, including files whose lines were all excluded. */
   readonly onResult: (result: FileResult) => void;
 }
@@ -150,7 +152,7 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         async (file) => {
           sawFile = true;
           const relativePath = toRelativePath(file.path);
-          if (!inScope(relativePath)) {
+          if (!inScope(relativePath) || request.skip?.(path.join(folder.path, relativePath))) {
             return;
           }
           const task = processFile(folder.path, relativePath, file).then(emit).catch(fail);

@@ -380,6 +380,22 @@ suite("code search pipeline edge cases", () => {
     assert.deepEqual(shown(await run(dir, "widget\\N", { isRegExp: true }), "a.c"), [1]);
   });
 
+  test("skipped files are neither reported nor counted", async () => {
+    const dir = workspace({ "a.c": "int widget_skip;\n", "b.c": "int widget_skip;\n" });
+    const results = new Map<string, FileResult>();
+    const summary = await searchCode({
+      rgPath,
+      query: { pattern: "widget_skip", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+      folders: [{ path: dir, options }],
+      maxResults: 1,
+      skip: (absolutePath) => absolutePath.endsWith("a.c"),
+      onResult: (r) => results.set(r.relativePath, r),
+    });
+    assert.deepEqual([...results.keys()], ["b.c"]);
+    assert.equal(summary.matchCount, 1);
+    assert.equal(summary.limitHit, false);
+  });
+
   test("a file name that is not UTF-8 is still read", async function () {
     if (process.platform !== "linux") {
       this.skip();

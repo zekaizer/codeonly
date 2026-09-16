@@ -210,7 +210,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     try {
       const maxResults = settings.maxResults();
       const summary = await vscode.window.withProgress({ location: { viewId: RESULTS_VIEW_ID } }, () =>
-        searchTargets(rgPath, targets, maxResults, abort.signal, onResult),
+        searchTargets(rgPath, targets, maxResults, abort.signal, onResult, (file) => seen.has(file)),
       );
       if (id !== this.runId) {
         return undefined;
@@ -480,6 +480,7 @@ async function searchTargets(
   maxResults: number | undefined,
   signal: AbortSignal,
   onResult: (result: FileResult) => void,
+  skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
   for (const { folder, query } of targets) {
@@ -490,6 +491,7 @@ async function searchTargets(
       folders: [folder],
       maxResults: remaining,
       signal,
+      skip,
       onResult,
     });
     total = total ? merge(total, summary) : summary;
