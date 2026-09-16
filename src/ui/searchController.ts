@@ -4,6 +4,7 @@ import { type FileResult, SearchError, type SearchFolder, type SearchSummary, se
 import { type SearchQuery, scopeIncludes, splitGlobList } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
 import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
+import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
 import type { ResultsTree } from "./resultsTree";
 import * as settings from "./settings";
@@ -396,7 +397,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       return;
     }
     hidden.sort((a, b) => a.location.localeCompare(b.location) || a.lineNumber - b.lineNumber);
-    this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${h.text.trim()}`);
+    this.report = hidden.map((h) => `${h.location}:${h.lineNumber}  [${h.reason}]  ${makePreview(h.text, []).label}`);
     this.log.info(`Hidden lines for "${form.pattern}" (${hidden.length}):`);
     for (const line of this.report) {
       this.log.info(`  ${line}`);

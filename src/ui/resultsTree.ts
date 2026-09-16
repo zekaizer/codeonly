@@ -218,9 +218,9 @@ export class ResultsTree implements vscode.TreeDataProvider<ResultNode>, vscode.
     );
     item.id = `${this.generation}/${node.file.result.absolutePath}:${line.lineNumber}`;
     item.contextValue = "line";
-    item.tooltip = `${node.file.result.relativePath}:${line.lineNumber}\n${line.text.trim()}`;
+    item.tooltip = `${node.file.result.relativePath}:${line.lineNumber}\n${preview.label}`;
     item.accessibilityInformation = {
-      label: `${line.text.trim()}, line ${line.lineNumber} in ${node.file.result.relativePath}`,
+      label: `${preview.label}, line ${line.lineNumber} in ${node.file.result.relativePath}`,
     };
     item.command = { command: "codeonly.openResult", title: "Open Result", arguments: [openArgs(node)] };
     return item;
