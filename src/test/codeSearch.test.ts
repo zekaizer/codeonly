@@ -351,6 +351,20 @@ suite("code search pipeline edge cases", () => {
     assert.equal(end.summary.matchCount, 4);
   });
 
+  test("results are filtered by the include and exclude globs, as VS Code does", async () => {
+    const files = ["src/a.c", "src/b.txt", "src/sub/c.h", "src/sub/d.txt", "drivers/Makefile", "drivers/net/foo.c"];
+    const dir = workspace(Object.fromEntries(files.map((f) => [f, "int widget_glob;\n"])));
+    const found = async (includes: string, excludes = "") => {
+      const [scoped] = resolveScope(includes, excludes, [{ name: "ws", path: dir }], os.homedir());
+      const o = await run(dir, "widget_glob", { includes: scoped.includes, excludes: scoped.excludes });
+      return filesWithLines(o);
+    };
+    assert.deepEqual(await found("./src/**/*.c"), ["src/a.c"]);
+    assert.deepEqual(await found("./drivers/*/foo.c"), ["drivers/net/foo.c"]);
+    assert.deepEqual(await found("./src/**/*.{c,h}"), ["src/a.c", "src/sub/c.h"]);
+    assert.deepEqual(await found("./src", "./src/**/*.txt"), ["src/a.c", "src/sub/c.h"]);
+  });
+
   test("a backslash in a Linux file name is part of the name", async function () {
     if (process.platform === "win32") {
       this.skip();

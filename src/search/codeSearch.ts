@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { isCFamilyFile } from "../classify/cFamily";
 import { classifyRange, scanRegions } from "../classify/cLexer";
 import { REASON_COMMENT_ONLY, decideLine } from "../classify/lineDecision";
+import { compileGlobs } from "./glob";
 import type { FolderOptions, SearchQuery } from "./query";
 import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, queryErrorMessage, runRipgrep } from "./ripgrep";
 
@@ -141,6 +142,7 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
       }
       const pending = new Set<Promise<void>>();
       let sawFile = false;
+      const inScope = scopeFilter(request.query, folder.options);
       const exit = await runRipgrep(
         request.rgPath,
         buildRipgrepArgs(request.query, folder.options),
@@ -148,6 +150,9 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
         async (file) => {
           sawFile = true;
           const relativePath = toRelativePath(file.path);
+          if (!inScope(relativePath)) {
+            return;
+          }
           const task = processFile(folder.path, relativePath, file).then(emit).catch(fail);
           pending.add(task);
           void task.finally(() => pending.delete(task));
@@ -197,6 +202,18 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
 
 /** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
 const NEWLINE_ESCAPE = /^(?:n|x0[aA]|x\{0*[aA]\}|u000[aA]|u\{0*[aA]\}|U0000000[aA]|U\{0*[aA]\}|012|o\{0*12\}|c[jJ])/;
+
+/**
+ * ripgrep's globs select the files to read, but its prefix globs for folder-relative includes
+ * (`src/**`) admit more than the include says. Like the Search view, results are therefore
+ * checked against the include and exclude globs again.
+ */
+function scopeFilter(query: SearchQuery, options: FolderOptions): (relativePath: string) => boolean {
+  const include = compileGlobs(query.includes, options.ignoreGlobCase);
+  const settingsExcludes = options.excludes.map((g) => g.replace(/\\/g, "/").replace(/(.)\/+$/, "$1"));
+  const exclude = compileGlobs([...settingsExcludes, ...query.excludes], options.ignoreGlobCase);
+  return (relativePath) => (!include || include(relativePath)) && !exclude?.(relativePath);
+}
 
 /** ripgrep prints paths below `.` with `./`; on Windows its separators are backslashes. */
 function toRelativePath(printed: string): string {
