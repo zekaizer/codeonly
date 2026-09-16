@@ -239,6 +239,12 @@ formEl.addEventListener("submit", (e) => {
   searchNow(true);
 });
 
+/** Set by a handled option chord until its modifiers are released. */
+let swallowKeyUp = false;
+
+// The webview host forwards every key event to the workbench, where Alt+R would also open the Run
+// menu and Cmd+Alt+C copy a file path. Stopping the event here, before it reaches the host's
+// window listener, keeps the chord ours.
 document.addEventListener("keydown", (e) => {
   const modifiers = IS_MAC ? e.altKey && e.metaKey && !e.ctrlKey : e.altKey && !e.ctrlKey && !e.metaKey;
   if (!modifiers || e.shiftKey || e.isComposing) {
@@ -247,7 +253,17 @@ document.addEventListener("keydown", (e) => {
   const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;
   if (button) {
     e.preventDefault();
+    e.stopPropagation();
+    swallowKeyUp = true;
     toggle(button);
+  }
+});
+
+// Otherwise the workbench sees Alt go down and up with nothing between and focuses the menu bar.
+document.addEventListener("keyup", (e) => {
+  if (swallowKeyUp) {
+    e.stopPropagation();
+    swallowKeyUp = e.altKey || e.metaKey;
   }
 });
 
