@@ -37,4 +37,4 @@ The search and classification modules do not import `vscode`, so they are unit-t
 | IC1   | Integration test: result entry carries path, line number, and original line text. | pass |
 | NFR2  | Integration test: excluded list holds the R1' line with reason `comment-only match`. | pass |
 | NFR1' | Benchmark: three symbols on the android16-6.12 tree, warm cache, under D2. | pass: `struct device` 3.06 s, `mutex_lock` 1.71 s, `kmalloc` 1.13 s without a result limit |
-| R7    | Bundled ripgrep path resolves in the installed VS Code server layout; end-to-end check over Remote-SSH by the user. | path resolves for servers 1.129–1.138; Remote-SSH check pending |
+| R7    | Bundled ripgrep path resolves in the installed VS Code server layout; end-to-end check over Remote-SSH by the user. | path resolves for servers 1.129–1.138; end to end with the extension in VS Code Server 1.138's server-side extension host (web client); Remote-SSH check by the user pending |
