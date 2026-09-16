@@ -131,7 +131,7 @@ function parse(
     }
   };
   for (const item of items) {
-    const named = multiRoot ? escapedFolderPrefix(item, roots) : undefined;
+    const named = escapedFolderPrefix(item, roots, multiRoot);
     if (named) {
       add(named.root, named.rest ? normalizePattern(named.rest) : undefined);
       continue;
@@ -154,23 +154,32 @@ function parse(
 }
 
 /**
- * `./<escaped folder name>/rest` for a folder whose name has glob characters. VS Code's parser
- * would split such a name at its first glob character and lose the folder, so it is matched first.
+ * A folder written with glob characters escaped: `./<name>/rest` (multi-root) or its absolute
+ * path. VS Code's parser would split such text at the first glob character and search from a
+ * parent folder, so it is matched to the folder first. The longest match wins.
  */
-function escapedFolderPrefix(item: string, roots: readonly WorkspaceRoot[]): { root: string; rest: string } | undefined {
+function escapedFolderPrefix(
+  item: string,
+  roots: readonly WorkspaceRoot[],
+  multiRoot: boolean,
+): { root: string; rest: string } | undefined {
+  let best: { root: string; rest: string; length: number } | undefined;
   for (const root of roots) {
-    if (!GLOB_CHARS.test(root.name)) {
-      continue;
+    const prefixes: string[] = [];
+    if (multiRoot && GLOB_CHARS.test(root.name)) {
+      prefixes.push(`./${escapeGlob(root.name)}`);
     }
-    const prefix = `./${escapeGlob(root.name)}`;
-    if (item === prefix || item === `${prefix}/`) {
-      return { root: root.path, rest: "" };
+    if (GLOB_CHARS.test(root.path)) {
+      prefixes.push(escapeGlob(toSlash(root.path)));
     }
-    if (item.startsWith(`${prefix}/`)) {
-      return { root: root.path, rest: item.slice(prefix.length + 1) };
+    for (const prefix of prefixes) {
+      const rest = item === prefix || item === `${prefix}/` ? "" : item.startsWith(`${prefix}/`) ? item.slice(prefix.length + 1) : undefined;
+      if (rest !== undefined && (!best || prefix.length > best.length)) {
+        best = { root: root.path, rest, length: prefix.length };
+      }
     }
   }
-  return undefined;
+  return best && { root: best.root, rest: best.rest };
 }
 
 function isSearchPath(item: string): boolean {

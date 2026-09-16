@@ -116,6 +116,20 @@ suite("search path for an Explorer selection", () => {
     assert.deepEqual(resolveScope(whole, "", roots, HOME), [{ path: "/b/drivers", includes: [], excludes: [] }]);
   });
 
+  test("a same-named folder whose path has glob characters is still searched from itself", () => {
+    const roots = [
+      { name: "common", path: "/w/a (old)/common" },
+      { name: "common", path: "/w/b/common" },
+    ];
+    const text = searchPathFor("/w/a (old)/common/drivers", roots[0], roots);
+    assert.deepEqual(resolveScope(text, "", roots, HOME), [
+      { path: "/w/a (old)/common", includes: ["drivers", "drivers/**"], excludes: [] },
+    ]);
+    assert.deepEqual(resolveScope(searchPathFor(roots[0].path, roots[0], roots), "", roots, HOME), [
+      { path: "/w/a (old)/common", includes: [], excludes: [] },
+    ]);
+  });
+
   test("multi-root folder names with glob characters still search that folder", () => {
     const odd = { name: "a[1] (6.12)", path: "/root/a[1] (6.12)" };
     const roots = [odd, multi[1]];
