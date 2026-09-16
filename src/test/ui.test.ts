@@ -119,6 +119,21 @@ suite("search UI", () => {
     }
   });
 
+  test("focus command runs the search for a newly seeded term", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(doc);
+    editor.selection = new vscode.Selection(4, 12, 4, 12);
+    await vscode.commands.executeCommand("codeonly.focusSearch");
+    assert.equal(api.form().pattern, "widget_count");
+    const status = api.status();
+    assert.equal(status.kind, "done");
+    assert.deepEqual(
+      fileEntry(await api.resultTree(), "src/main.c").children.map((c) => labelOf(c.item)),
+      ["return widget_count; /* widget_count */", "int total = widget_count + 1;"],
+    );
+  });
+
   test("focus command seeds the query from the selection, else the word at the cursor", async () => {
     const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
     const editor = await vscode.window.showTextDocument(doc);

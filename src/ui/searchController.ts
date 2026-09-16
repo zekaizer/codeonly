@@ -272,14 +272,32 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     }
   }
 
-  /** Reveals the query view with its input focused, seeded from the active editor. */
+  /**
+   * Reveals the query view with its input focused, seeded from the active editor. A new seed is
+   * searched right away when search-on-type is on; otherwise the old results are cleared so that
+   * they are not shown under the new term.
+   */
   async focusSearch(): Promise<void> {
     const seed = seedFromEditor(this.form.isRegExp);
-    if (seed !== undefined) {
+    const stale = this.status.kind === "idle" || this.status.kind === "error";
+    const changed = seed !== undefined && (seed !== this.form.pattern || stale);
+    if (changed) {
       this.setForm({ ...this.form, pattern: seed }, true);
     }
     await vscode.commands.executeCommand("codeonly.query.focus");
     this.view?.focusInput();
+    if (!changed) {
+      return;
+    }
+    if (settings.viewConfig().searchOnType) {
+      await this.search(this.form, false);
+    } else {
+      this.abort?.abort();
+      this.runId++;
+      this.report = [];
+      this.tree.reset([]);
+      this.setStatus({ kind: "idle" });
+    }
   }
 
   /** Scopes the query to `uris` (Explorer selection), each relative to its workspace folder. */
