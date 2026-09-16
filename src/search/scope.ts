@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { splitGlobList } from "./query";
+import { escapeGlob, splitGlobList } from "./query";
 
 export interface WorkspaceRoot {
   readonly name: string;
@@ -14,7 +14,30 @@ export interface ScopedFolder {
 }
 
 /** The include or exclude text names something that does not exist. The message is user-facing. */
-export class ScopeError extends Error {}
+export class ScopeError extends Error {
+  constructor(
+    message: string,
+    readonly field: "includes" | "excludes" = "includes",
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Include text that selects `target` (an Explorer selection inside `root`). In a multi-root
+ * workspace a folder name with glob characters cannot be written as `./<name>`, so the absolute
+ * path is used instead.
+ */
+export function searchPathFor(target: string, root: WorkspaceRoot, multiRoot: boolean): string {
+  const rel = toSlash(path.relative(root.path, target));
+  if (!multiRoot) {
+    return rel ? `./${escapeGlob(rel)}` : "";
+  }
+  if (/[*?[\]{}(),]/.test(root.name)) {
+    return escapeGlob(toSlash(target));
+  }
+  return rel ? `./${root.name}/${escapeGlob(rel)}` : `./${root.name}`;
+}
 
 interface SearchPath {
   readonly root: string;
@@ -40,8 +63,8 @@ export function resolveScope(
   roots: readonly WorkspaceRoot[],
   homedir: string,
 ): ScopedFolder[] {
-  const included = parse(includes, roots, homedir);
-  const excluded = parse(excludes, roots, homedir);
+  const included = parse(includes, roots, homedir, "includes");
+  const excluded = parse(excludes, roots, homedir, "excludes");
   const targets: SearchPath[] =
     included.searchPaths.length > 0 ? included.searchPaths : roots.map((r) => ({ root: r.path }));
   const out: ScopedFolder[] = [];
@@ -60,7 +83,7 @@ export function resolveScope(
   return out;
 }
 
-function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string): Parsed {
+function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string, field: ScopeError["field"]): Parsed {
   const items = splitGlobList(toSlash(text)).map((p) => p.replace(/^~($|\/)/, `${toSlash(homedir)}$1`));
   const globs: string[] = [];
   const byRoot = new Map<string, SearchPath>();
@@ -75,7 +98,7 @@ function parse(text: string, roots: readonly WorkspaceRoot[], homedir: string): 
     }
     const { pathPortion, globPortion } = splitPathAndGlob(item);
     const glob = globPortion === undefined ? undefined : normalizePattern(globPortion);
-    for (const { root, pattern } of expandSearchPath(pathPortion, roots)) {
+    for (const { root, pattern } of expandSearchPath(pathPortion, roots, field)) {
       const combined = pattern && glob ? `${pattern}/${glob}` : pattern || glob;
       const patterns = combined ? (combined.endsWith("**") ? [combined] : [combined, `${combined}/**`]) : undefined;
       const existing = byRoot.get(root);
@@ -109,7 +132,11 @@ function splitPathAndGlob(item: string): { pathPortion: string; globPortion?: st
   return { pathPortion: item };
 }
 
-function expandSearchPath(item: string, roots: readonly WorkspaceRoot[]): { root: string; pattern?: string }[] {
+function expandSearchPath(
+  item: string,
+  roots: readonly WorkspaceRoot[],
+  field: ScopeError["field"],
+): { root: string; pattern?: string }[] {
   if (path.isAbsolute(item)) {
     return [{ root: trimSeparators(path.normalize(item)) }];
   }
@@ -118,7 +145,7 @@ function expandSearchPath(item: string, roots: readonly WorkspaceRoot[]): { root
     if (item === ".." || item.startsWith("../")) {
       return [{ root: trimSeparators(path.resolve(folder.path, item)) }];
     }
-    return [{ root: folder.path, pattern: item === "." ? "" : normalizePattern(item) }];
+    return [{ root: folder.path, pattern: normalizePattern(item) }];
   }
   if (item === "./") {
     return [];
@@ -129,7 +156,7 @@ function expandSearchPath(item: string, roots: readonly WorkspaceRoot[]): { root
     return m ? [{ root: folder.path, pattern: m[1] ? normalizePattern(m[1]) : undefined }] : [];
   });
   if (matches.length === 0) {
-    throw new ScopeError(`Workspace folder does not exist: ${rest.replace(/\/+$/, "")}`);
+    throw new ScopeError(`Workspace folder does not exist: ${rest.replace(/\/+$/, "")}`, field);
   }
   return matches;
 }
@@ -142,9 +169,12 @@ function normalizePattern(pattern: string): string {
   return toSlash(pattern).replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
+/** Drops trailing separators, but keeps a file-system root such as `/` or `C:\\`. */
 function trimSeparators(p: string): string {
-  const trimmed = p.replace(/[\\/]+$/, "");
-  return trimmed || p;
+  if (path.parse(p).root === p) {
+    return p;
+  }
+  return p.replace(/[\\/]+$/, "");
 }
 
 function samePath(a: string, b: string): boolean {

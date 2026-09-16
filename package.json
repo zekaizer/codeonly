@@ -70,7 +70,7 @@
         "title": "Search Again",
         "category": "CodeOnly",
         "icon": "$(refresh)",
-        "enablement": "codeonly.state != idle"
+        "enablement": "codeonly.hasPattern"
       },
       {
         "command": "codeonly.cancel",
@@ -83,7 +83,7 @@
         "title": "Clear Search Results",
         "category": "CodeOnly",
         "icon": "$(clear-all)",
-        "enablement": "codeonly.state != idle"
+        "enablement": "codeonly.hasPattern || codeonly.hasResults || codeonly.state != idle"
       },
       {
         "command": "codeonly.expandAll",
@@ -248,7 +248,26 @@
       {
         "command": "codeonly.focusSearch",
         "key": "ctrl+shift+alt+f",
-        "mac": "cmd+shift+alt+f"
+        "mac": "cmd+shift+alt+f",
+        "when": "!codeonly.queryFocused && focusedView != 'codeonly.results'"
+      },
+      {
+        "command": "codeonly.focusSearch",
+        "key": "ctrl+shift+alt+f",
+        "mac": "cmd+shift+alt+f",
+        "when": "codeonly.queryFocused || focusedView == 'codeonly.results'",
+        "args": {
+          "seed": false
+        }
+      },
+      {
+        "command": "codeonly.focusSearch",
+        "key": "ctrl+up",
+        "mac": "cmd+up",
+        "when": "focusedView == 'codeonly.results'",
+        "args": {
+          "seed": false
+        }
       }
     ],
     "configuration": {

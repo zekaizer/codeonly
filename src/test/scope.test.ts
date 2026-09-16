@@ -1,5 +1,7 @@
 import * as assert from "node:assert/strict";
-import { ScopeError, type ScopedFolder, resolveScope } from "../search/scope";
+import * as path from "node:path";
+import { compileGlobs } from "../search/glob";
+import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
 
 const HOME = "/home/me";
 const single = [{ name: "ws", path: "/ws" }];
@@ -61,6 +63,12 @@ suite("search scope (VS Code include/exclude semantics)", () => {
     assert.deepEqual(scope("./", "", multi).length, 2);
   });
 
+  test("a lone dot is kept as a literal pattern, as VS Code does", () => {
+    assert.deepEqual(scope("."), [{ path: "/ws", includes: [".", "./**"], excludes: [] }]);
+    assert.deepEqual(scope("", "."), [{ path: "/ws", includes: [], excludes: [".", "./**"] }]);
+    assert.deepEqual(scope("./."), scope("."));
+  });
+
   test("an unknown folder name is an error", () => {
     assert.throws(() => scope("./nope/src", "", multi), (e: unknown) => e instanceof ScopeError && /nope/.test(e.message));
   });
@@ -83,5 +91,34 @@ suite("search scope (VS Code include/exclude semantics)", () => {
     assert.deepEqual(scope("{a,b}.c, ./x[,]y"), [
       { path: "/ws", includes: ["x[,]y", "x[,]y/**", "**/{a,b}.c/**", "**/{a,b}.c"], excludes: [] },
     ]);
+  });
+});
+
+suite("search path for an Explorer selection", () => {
+  test("single root: a relative path with glob characters escaped", () => {
+    assert.equal(searchPathFor("/ws/src/a,b", single[0], false), "./src/a[,]b");
+    assert.equal(searchPathFor("/ws", single[0], false), "");
+  });
+
+  test("multi-root: prefixed with the folder name", () => {
+    assert.equal(searchPathFor("/root/a/src", multi[0], true), "./a/src");
+    assert.equal(searchPathFor("/root/b", multi[1], true), "./b");
+  });
+
+  test("multi-root folder names with glob characters fall back to an absolute path that still resolves", () => {
+    const odd = { name: "a[1]", path: "/root/a[1]" };
+    const roots = [odd, multi[1]];
+    const text = searchPathFor("/root/a[1]/src", odd, true);
+    assert.equal(text, "/root/a[[]1[]]/src");
+    const [scoped] = resolveScope(text, "", roots, HOME);
+    const matcher = compileGlobs(scoped.includes, false);
+    assert.ok(matcher);
+    assert.ok(matcher(path.posix.relative(scoped.path, "/root/a[1]/src/x.c")));
+    assert.ok(!matcher(path.posix.relative(scoped.path, "/root/a[1]/lib/x.c")));
+  });
+
+  test("scope errors name the field they come from", () => {
+    assert.throws(() => resolveScope("", "./nope", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "excludes");
+    assert.throws(() => resolveScope("./nope", "", multi, HOME), (e: unknown) => e instanceof ScopeError && e.field === "includes");
   });
 });

@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FolderOptions, type SearchQuery, escapeGlob, splitGlobList } from "../search/query";
-import { buildRipgrepArgs, locateRipgrep, ripgrepCandidates } from "../search/ripgrep";
+import { buildRipgrepArgs, locateRipgrep, queryErrorMessage, ripgrepCandidates } from "../search/ripgrep";
 
 const folder: FolderOptions = {
   excludes: ["**/.git"],
@@ -145,12 +145,38 @@ suite("ripgrep arguments", () => {
   test("glob lists split on top-level commas", () => {
     assert.deepEqual(splitGlobList(" a, {b,c}/** ,, d "), ["a", "{b,c}/**", "d"]);
     assert.deepEqual(splitGlobList("x[,]y, z"), ["x[,]y", "z"]);
+    // An unclosed class keeps the rest, so ripgrep can report the bad glob.
+    assert.deepEqual(splitGlobList("src/["), ["src/["]);
+    assert.deepEqual(splitGlobList("*.c, build[, x"), ["*.c", "build[, x"]);
     assert.deepEqual(splitGlobList(""), []);
   });
 
   test("paths are escaped for use as globs", () => {
     assert.equal(escapeGlob("a,b/{c}/[d]*?"), "a[,]b/[{]c[}]/[[]d[]][*][?]");
     assert.deepEqual(splitGlobList(`./${escapeGlob("x,y")}, ./z`), ["./x[,]y", "./z"]);
+  });
+});
+
+suite("ripgrep error messages", () => {
+  test("PCRE2's reason wins when both regex engines fail", () => {
+    const stderr = [
+      "rg: regex could not be compiled with either the default regex engine or with PCRE2.",
+      "",
+      "default regex engine error:",
+      "regex parse error:",
+      "    (?:(?<=int )f()",
+      "       ^^^^",
+      "error: look-around, including look-ahead and look-behind, is not supported",
+      "",
+      "PCRE2 regex engine error:",
+      "PCRE2: error compiling pattern at offset 13: missing closing parenthesis",
+    ].join("\n");
+    assert.equal(queryErrorMessage(stderr), "Invalid regular expression: missing closing parenthesis");
+  });
+
+  test("errors that are not about the query are not query errors", () => {
+    assert.equal(queryErrorMessage("rg: ./dangling: No such file or directory (os error 2)"), undefined);
+    assert.match(queryErrorMessage("rg: error parsing glob '**/{a': unclosed alternate group") ?? "", /Invalid file pattern/);
   });
 });
 

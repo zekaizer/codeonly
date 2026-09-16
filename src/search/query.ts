@@ -35,7 +35,13 @@ export function splitGlobList(input: string): string[] {
   let start = 0;
   for (let i = 0; i <= input.length; i++) {
     const ch = input[i];
-    if (classStart >= 0) {
+    if (i === input.length) {
+      // An unclosed class keeps the rest as one item.
+      const item = input.slice(start).trim();
+      if (item) {
+        out.push(item);
+      }
+    } else if (classStart >= 0) {
       // A `]` first in the class (after an optional `!` or `^`) is a member, as in `[]]`.
       const first = /[!^]/.test(input[classStart + 1] ?? "") ? classStart + 2 : classStart + 1;
       if (ch === "]" && i > first) {
@@ -47,7 +53,7 @@ export function splitGlobList(input: string): string[] {
       depth++;
     } else if (ch === "}" && depth > 0) {
       depth--;
-    } else if (i === input.length || (ch === "," && depth === 0)) {
+    } else if (ch === "," && depth === 0) {
       const item = input.slice(start, i).trim();
       if (item) {
         out.push(item);

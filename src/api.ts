@@ -1,6 +1,6 @@
 import type * as vscode from "vscode";
 import type { SearchSummary } from "./search/codeSearch";
-import type { QueryForm, SearchStatus } from "./shared/protocol";
+import type { QueryForm, SearchStatus, StatusCommand } from "./shared/protocol";
 
 export interface ResultEntry {
   /** Opaque node accepted by the result commands (`codeonly.dismiss`, `codeonly.copyPath`, ...). */
@@ -20,6 +20,8 @@ export interface CodeOnlyApi {
   hiddenLineReport(): readonly string[];
   /** Match highlights currently applied to visible editors showing `uri`. */
   highlightedRanges(uri: vscode.Uri): readonly vscode.Range[];
+  /** Runs a command as if chosen from the query view's status line. */
+  statusCommand(command: StatusCommand): Promise<void>;
   /** Context key values last set by the extension. */
   contextKeys(): Readonly<Record<string, unknown>>;
   /** Resolves once the query view's script has started. */

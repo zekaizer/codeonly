@@ -9,6 +9,7 @@ export interface QueryViewHost {
   onSearch(form: QueryForm, commit: boolean): void;
   onFormChanged(form: QueryForm): void;
   onCancel(): void;
+  onFocusChanged(focused: boolean): void;
   onCommand(command: StatusCommand): void;
 }
 
@@ -35,12 +36,14 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
     view.onDidChangeVisibility(() => {
       if (!view.visible && this.view === view) {
         this.ready = false;
+        this.host.onFocusChanged(false);
       }
     });
     view.onDidDispose(() => {
       if (this.view === view) {
         this.view = undefined;
         this.ready = false;
+        this.host.onFocusChanged(false);
       }
     });
   }
@@ -88,6 +91,9 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
       case "cancel":
         this.host.onCancel();
         break;
+      case "focusChanged":
+        this.host.onFocusChanged(message.focused);
+        break;
       case "command":
         this.host.onCommand(message.command);
         break;
@@ -131,12 +137,12 @@ export class QueryViewProvider implements vscode.WebviewViewProvider {
   <button type="button" class="icon-button" id="details" aria-expanded="false" aria-controls="detailsPanel"
     title="Toggle Search Details" aria-label="Toggle Search Details"><span aria-hidden="true">···</span></button>
   <div class="details" id="detailsPanel" hidden>
-    <div class="field">
+    <div class="field" id="includesField">
       <label class="prefix" for="includes" title="files to include">include</label>
       <input id="includes" class="input" type="text" spellcheck="false"
         placeholder="e.g. *.c, ./drivers/gpu" aria-label="files to include">
     </div>
-    <div class="field">
+    <div class="field" id="excludesField">
       <label class="prefix" for="excludes" title="files to exclude">exclude</label>
       <input id="excludes" class="input" type="text" spellcheck="false"
         placeholder="e.g. **/tests/**" aria-label="files to exclude">

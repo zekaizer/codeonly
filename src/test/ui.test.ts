@@ -147,6 +147,90 @@ suite("search UI", () => {
     assert.equal(api.form().pattern, "widget_count");
   });
 
+  test("the focus command can keep the current term", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    const doc = await vscode.workspace.openTextDocument(path.join(FIXTURE, "src/main.c"));
+    const editor = await vscode.window.showTextDocument(doc);
+    editor.selection = new vscode.Selection(4, 12, 4, 12);
+    await vscode.commands.executeCommand("codeonly.focusSearch", { seed: false });
+    assert.equal(api.form().pattern, "widget_init");
+  });
+
+  test("the shortcut does not reseed from inside the view, and Ctrl+Up returns to the search box", () => {
+    const ext = vscode.extensions.getExtension("zekaizer.codeonly");
+    const keys = (ext?.packageJSON.contributes.keybindings ?? []) as {
+      command: string;
+      key: string;
+      when?: string;
+      args?: unknown;
+    }[];
+    const focus = keys.filter((k) => k.command === "codeonly.focusSearch");
+    // Focus inside the webview is not visible to `focusedView`; the view reports it instead.
+    const inView = focus.find((k) => k.key === "ctrl+shift+alt+f" && k.args);
+    assert.equal(inView?.when, "codeonly.queryFocused || focusedView == 'codeonly.results'");
+    assert.deepEqual(inView?.args, { seed: false });
+    const outside = focus.find((k) => k.key === "ctrl+shift+alt+f" && !k.args);
+    assert.equal(outside?.when, "!codeonly.queryFocused && focusedView != 'codeonly.results'");
+    const back = focus.find((k) => k.key === "ctrl+up");
+    assert.equal(back?.when, "focusedView == 'codeonly.results'");
+    assert.deepEqual(back?.args, { seed: false });
+  });
+
+  test("hasPattern follows the search term, and Search Again and Clear use it", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    for (const entry of await api.resultTree()) {
+      await vscode.commands.executeCommand("codeonly.dismiss", entry.node);
+    }
+    assert.equal(api.contextKeys()["codeonly.hasPattern"], true);
+    await vscode.commands.executeCommand("codeonly.clear");
+    assert.equal(api.contextKeys()["codeonly.hasPattern"], false);
+    const ext = vscode.extensions.getExtension("zekaizer.codeonly");
+    const commands = (ext?.packageJSON.contributes.commands ?? []) as { command: string; enablement?: string }[];
+    assert.equal(commands.find((c) => c.command === "codeonly.rerun")?.enablement, "codeonly.hasPattern");
+    assert.equal(
+      commands.find((c) => c.command === "codeonly.clear")?.enablement,
+      "codeonly.hasPattern || codeonly.hasResults || codeonly.state != idle",
+    );
+  });
+
+  test("the hidden-lines link searches again when the lines were not recorded", async () => {
+    await api.search({ ...base, pattern: "widget_init" });
+    assert.deepEqual(api.hiddenLineReport(), []);
+    const config = vscode.workspace.getConfiguration("codeonly");
+    await config.update("diagnostics.logExcludedLines", true, vscode.ConfigurationTarget.Global);
+    try {
+      await api.statusCommand("showHiddenLines");
+      assert.ok(api.hiddenLineReport().some((l) => l.includes("src/main.c:1")));
+    } finally {
+      await config.update("diagnostics.logExcludedLines", undefined, vscode.ConfigurationTarget.Global);
+    }
+  });
+
+  test("opening the same result twice keeps the editor and moves focus to it", async () => {
+    await api.search({ ...base, pattern: "widget_count" });
+    const command = fileEntry(await api.resultTree(), "src/main.c").children[1].item.command;
+    assert.ok(command);
+    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
+    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, true);
+    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
+    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, false);
+  });
+
+  test("errors point at the field they are about", async () => {
+    const fieldOf = () => {
+      const status = api.status();
+      return status.kind === "error" ? status.field : `not an error: ${status.kind}`;
+    };
+    await api.search({ ...base, pattern: "(", isRegExp: true });
+    assert.equal(fieldOf(), "pattern");
+    await api.search({ ...base, pattern: "widget_init", isRegExp: false, includes: "{a" });
+    assert.equal(fieldOf(), "includes");
+    assert.equal(api.form().showDetails, true);
+    await api.search({ ...base, pattern: "widget_init", includes: "", excludes: "[z" });
+    assert.equal(fieldOf(), "excludes");
+    await api.search({ excludes: "" });
+  });
+
   test("query view script starts", async () => {
     await vscode.commands.executeCommand("codeonly.query.focus");
     await withTimeout(api.queryViewReady(), 15000, "query view ready");
@@ -264,7 +348,7 @@ suite("search UI", () => {
     const status = api.status();
     assert.equal(status.kind, "error");
     if (status.kind === "error") {
-      assert.equal(status.message, "Invalid regular expression: unclosed group");
+      assert.equal(status.message, "Invalid regular expression: missing closing parenthesis");
     }
     await api.search({ isRegExp: false });
   });

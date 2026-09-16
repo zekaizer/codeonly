@@ -2,10 +2,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import { type SearchQuery, escapeGlob } from "../search/query";
+import type { SearchQuery } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
-import { ScopeError, type ScopedFolder, resolveScope } from "../search/scope";
-import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
+import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
+import {
+  EMPTY_FORM,
+  type FormField,
+  type QueryForm,
+  type SearchStatus,
+  type StatusCommand,
+  type ToWebview,
+} from "../shared/protocol";
 import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
 import type { ResultsTree } from "./resultsTree";
@@ -40,6 +47,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private ripgrep: { configured: string; path: string } | undefined;
   private report: string[] = [];
   private readonly contextValues: Record<string, unknown> = {};
+  private queryFocused = false;
   view: ViewChannel | undefined;
 
   constructor(
@@ -89,26 +97,29 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     this.abort?.abort();
   }
 
+  onFocusChanged(focused: boolean): void {
+    this.queryFocused = focused;
+    this.updateContext();
+  }
+
   onCommand(command: StatusCommand): void {
+    void this.runCommand(command);
+  }
+
+  async runCommand(command: StatusCommand): Promise<void> {
     switch (command) {
       case "showHiddenLines":
-        void this.showHiddenLines();
-        break;
+        return this.showHiddenLines();
       case "openExcludeSettings":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "search.exclude");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "search.exclude");
       case "openMaxResultsSetting":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "search.maxResults");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "search.maxResults");
       case "openRipgrepSetting":
-        void vscode.commands.executeCommand("workbench.action.openSettings", "codeonly.ripgrepPath");
-        break;
+        return vscode.commands.executeCommand("workbench.action.openSettings", "codeonly.ripgrepPath");
       case "showLog":
-        this.log.show(true);
-        break;
+        return this.log.show(true);
       case "focusResults":
-        void vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
-        break;
+        return vscode.commands.executeCommand(`${RESULTS_VIEW_ID}.focus`);
     }
   }
 
@@ -140,7 +151,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       scoped = resolveScope(form.includes, form.excludes, roots, os.homedir());
     } catch (e) {
       if (e instanceof ScopeError) {
-        this.fail(e.message);
+        this.fail(e.message, undefined, e.field);
         return undefined;
       }
       throw e;
@@ -210,7 +221,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
     try {
       const maxResults = settings.maxResults();
       const summary = await vscode.window.withProgress({ location: { viewId: RESULTS_VIEW_ID } }, () =>
-        searchTargets(rgPath, targets, maxResults, abort.signal, onResult),
+        searchTargets(rgPath, targets, maxResults, abort.signal, onResult, (file) => seen.has(file)),
       );
       if (id !== this.runId) {
         return undefined;
@@ -237,7 +248,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       }
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof SearchError) {
-        this.fail(message);
+        this.fail(message, undefined, errorField(e));
         this.log.warn(`Search for "${form.pattern}" failed: ${e.detail ?? message}`);
       } else {
         this.fail(`Search failed: ${message}`, "showLog");
@@ -283,8 +294,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
    * searched right away when search-on-type is on; otherwise the old results are cleared so that
    * they are not shown under the new term.
    */
-  async focusSearch(): Promise<void> {
-    const seed = seedFromEditor(this.form.isRegExp);
+  async focusSearch(options: { seed?: boolean } = {}): Promise<void> {
+    const seed = options.seed === false ? undefined : seedFromEditor(this.form.isRegExp);
     const stale = this.status.kind === "idle" || this.status.kind === "error";
     const changed = seed !== undefined && (seed !== this.form.pattern || stale);
     if (changed) {
@@ -315,14 +326,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (!folder) {
         continue;
       }
-      const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
-      const parts = [multiRoot ? folder.name : undefined, rel || undefined].filter((p): p is string => !!p);
-      if (parts.length === 0) {
+      const scope = searchPathFor(uri.fsPath, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
+      if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;
         break;
       }
-      scopes.push(`./${escapeGlob(parts.join("/"))}`);
+      scopes.push(scope);
     }
     if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");
@@ -352,6 +362,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   private setForm(form: QueryForm, notifyView: boolean): void {
     this.form = form;
     void this.state.update(FORM_KEY, form);
+    this.updateContext();
     if (notifyView) {
       this.view?.post({ type: "form", form, focus: false });
     }
@@ -365,9 +376,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   }
 
   /** An error replaces the results: whatever is listed no longer matches the query. */
-  private fail(message: string, action?: StatusCommand): void {
+  private fail(message: string, action?: StatusCommand, field?: FormField): void {
     this.tree.reset([]);
-    this.setStatus({ kind: "error", message, action });
+    // The field in error has to be visible.
+    if ((field === "includes" || field === "excludes") && !this.form.showDetails) {
+      this.setForm({ ...this.form, showDetails: true }, true);
+    }
+    this.setStatus({ kind: "error", message, action, field });
   }
 
   private updateTreeView(): void {
@@ -400,6 +415,8 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
   /** Context keys are derived from the status and the tree only, so no code path can leave them stale. */
   private updateContext(): void {
     const values: Record<string, unknown> = {
+      "codeonly.hasPattern": this.form.pattern !== "",
+      "codeonly.queryFocused": this.queryFocused,
       "codeonly.state": this.status.kind,
       "codeonly.searching": this.status.kind === "searching",
       "codeonly.hasResults": !this.tree.isEmpty,
@@ -450,6 +467,10 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   private async showHiddenLines(): Promise<void> {
     if (settings.logExcludedLines()) {
+      // Logging was turned on after this search, so its hidden lines were not recorded.
+      if (this.report.length === 0 && this.status.kind === "done" && this.status.hiddenLineCount > 0) {
+        await this.rerun();
+      }
       this.log.show(true);
       return;
     }
@@ -480,6 +501,7 @@ async function searchTargets(
   maxResults: number | undefined,
   signal: AbortSignal,
   onResult: (result: FileResult) => void,
+  skip: (absolutePath: string) => boolean,
 ): Promise<SearchSummary> {
   let total: SearchSummary | undefined;
   for (const { folder, query } of targets) {
@@ -490,6 +512,7 @@ async function searchTargets(
       folders: [folder],
       maxResults: remaining,
       signal,
+      skip,
       onResult,
     });
     total = total ? merge(total, summary) : summary;
@@ -522,6 +545,18 @@ function merge(a: SearchSummary, b: SearchSummary): SearchSummary {
     durationMs: a.durationMs + b.durationMs,
     warnings: [...a.warnings, ...b.warnings],
   };
+}
+
+/** The form field a search error is about, if any. */
+function errorField(error: SearchError): FormField | undefined {
+  if (/^(Invalid regular expression|Multi-line)/.test(error.message)) {
+    return "pattern";
+  }
+  const glob = /error parsing glob '([^']*)'/.exec(error.detail ?? "")?.[1];
+  if (glob !== undefined) {
+    return glob.startsWith("!") ? "excludes" : "includes";
+  }
+  return undefined;
 }
 
 /** A search root below a workspace folder still names files relative to that folder. */

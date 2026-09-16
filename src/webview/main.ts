@@ -29,6 +29,8 @@ function element<T extends HTMLElement>(id: string): T {
 const formEl = element<HTMLFormElement>("query");
 const pattern = element<HTMLInputElement>("pattern");
 const patternField = element<HTMLDivElement>("patternField");
+const includesField = element<HTMLDivElement>("includesField");
+const excludesField = element<HTMLDivElement>("excludesField");
 const includes = element<HTMLInputElement>("includes");
 const excludes = element<HTMLInputElement>("excludes");
 const caseToggle = element<HTMLButtonElement>("case");
@@ -39,6 +41,16 @@ const detailsPanel = element<HTMLDivElement>("detailsPanel");
 const statusEl = element<HTMLDivElement>("status");
 
 const HISTORY_LIMIT = 50;
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+// The Search view's option keys: Alt+C/W/R, and Cmd+Alt+C/W/R on macOS, where Option alone types characters.
+for (const [button, name, letter] of [
+  [caseToggle, "Match Case", "C"],
+  [wordToggle, "Match Whole Word", "W"],
+  [regexToggle, "Use Regular Expression", "R"],
+] as const) {
+  button.title = `${name} (${IS_MAC ? "⌥⌘" : "Alt+"}${letter})`;
+}
 
 let config: ViewConfig = { searchOnType: true, debounceMs: 300 };
 let history: string[] = [];
@@ -228,7 +240,8 @@ formEl.addEventListener("submit", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) {
+  const modifiers = IS_MAC ? e.altKey && e.metaKey && !e.ctrlKey : e.altKey && !e.ctrlKey && !e.metaKey;
+  if (!modifiers || e.shiftKey || e.isComposing) {
     return;
   }
   const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;
@@ -255,10 +268,13 @@ statusEl.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("focus", () => {
+  post({ type: "focusChanged", focused: true });
   if (!document.activeElement || document.activeElement === document.body) {
     focusPattern();
   }
 });
+
+window.addEventListener("blur", () => post({ type: "focusChanged", focused: false }));
 
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
   const message = event.data;
@@ -283,6 +299,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
       break;
     }
     case "form":
+      historyIndex = -1;
       render(message.form);
       if (message.focus) {
         focusPattern();
@@ -336,7 +353,15 @@ function renderStatus(status: SearchStatus): void {
   statusEl.setAttribute("aria-busy", String(status.kind === "searching"));
   statusEl.replaceChildren();
   statusEl.classList.toggle("error", status.kind === "error");
-  patternField.classList.toggle("error", status.kind === "error");
+  const invalid = status.kind === "error" ? status.field : undefined;
+  for (const [name, field, input] of [
+    ["pattern", patternField, pattern],
+    ["includes", includesField, includes],
+    ["excludes", excludesField, excludes],
+  ] as const) {
+    field.classList.toggle("error", invalid === name);
+    input.setAttribute("aria-invalid", String(invalid === name));
+  }
   statusEl.title = "";
   switch (status.kind) {
     case "idle":

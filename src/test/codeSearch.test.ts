@@ -192,7 +192,7 @@ suite("code search pipeline", () => {
   test("invalid regular expression is reported briefly, with ripgrep's text as detail", async () => {
     await assert.rejects(search("(", { isRegExp: true }), (e: unknown) => {
       assert.ok(e instanceof SearchError);
-      assert.equal(e.message, "Invalid regular expression: unclosed group");
+      assert.equal(e.message, "Invalid regular expression: missing closing parenthesis");
       assert.match(e.detail ?? "", /regex parse error/);
       return true;
     });
@@ -349,6 +349,51 @@ suite("code search pipeline edge cases", () => {
     );
     assert.deepEqual(shown(end, "e.txt"), [1, 2]);
     assert.equal(end.summary.matchCount, 4);
+  });
+
+  test("results are filtered by the include and exclude globs, as VS Code does", async () => {
+    const files = ["src/a.c", "src/b.txt", "src/sub/c.h", "src/sub/d.txt", "drivers/Makefile", "drivers/net/foo.c"];
+    const dir = workspace(Object.fromEntries(files.map((f) => [f, "int widget_glob;\n"])));
+    const found = async (includes: string, excludes = "") => {
+      const [scoped] = resolveScope(includes, excludes, [{ name: "ws", path: dir }], os.homedir());
+      const o = await run(dir, "widget_glob", { includes: scoped.includes, excludes: scoped.excludes });
+      return filesWithLines(o);
+    };
+    assert.deepEqual(await found("./src/**/*.c"), ["src/a.c"]);
+    assert.deepEqual(await found("./drivers/*/foo.c"), ["drivers/net/foo.c"]);
+    assert.deepEqual(await found("./src/**/*.{c,h}"), ["src/a.c", "src/sub/c.h"]);
+    assert.deepEqual(await found("./src", "./src/**/*.txt"), ["src/a.c", "src/sub/c.h"]);
+  });
+
+  test("a backslash in a Linux file name is part of the name", async function () {
+    if (process.platform === "win32") {
+      this.skip();
+    }
+    const dir = workspace({ "a\\b.c": "int widget_bs; // widget_bs\n", "n\\x.txt": "widget_bs\n" });
+    const o = await run(dir, "widget_bs");
+    assert.deepEqual(shown(o, "a\\b.c"), [1]);
+    assert.equal(o.results.get("n\\x.txt")?.absolutePath, path.join(dir, "n\\x.txt"));
+  });
+
+  test("a PCRE2-only escape is not taken for a newline", async () => {
+    const dir = workspace({ "a.c": "int widget_nl;\n" });
+    assert.deepEqual(shown(await run(dir, "widget\\N", { isRegExp: true }), "a.c"), [1]);
+  });
+
+  test("skipped files are neither reported nor counted", async () => {
+    const dir = workspace({ "a.c": "int widget_skip;\n", "b.c": "int widget_skip;\n" });
+    const results = new Map<string, FileResult>();
+    const summary = await searchCode({
+      rgPath,
+      query: { pattern: "widget_skip", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+      folders: [{ path: dir, options }],
+      maxResults: 1,
+      skip: (absolutePath) => absolutePath.endsWith("a.c"),
+      onResult: (r) => results.set(r.relativePath, r),
+    });
+    assert.deepEqual([...results.keys()], ["b.c"]);
+    assert.equal(summary.matchCount, 1);
+    assert.equal(summary.limitHit, false);
   });
 
   test("a file name that is not UTF-8 is still read", async function () {

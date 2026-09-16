@@ -35,7 +35,15 @@ export type SearchStatus =
       /** Stopped by the user; counts cover what was found until then. */
       readonly cancelled: boolean;
     }
-  | { readonly kind: "error"; readonly message: string; readonly action?: StatusCommand };
+  | {
+      readonly kind: "error";
+      readonly message: string;
+      readonly action?: StatusCommand;
+      /** The input the error is about, if it is one of the form's fields. */
+      readonly field?: FormField;
+    };
+
+export type FormField = "pattern" | "includes" | "excludes";
 
 /** Commands the query view can ask the extension to run. */
 export type StatusCommand =
@@ -71,4 +79,6 @@ export type FromWebview =
   | { readonly type: "search"; readonly form: QueryForm; readonly commit: boolean }
   | { readonly type: "formChanged"; readonly form: QueryForm }
   | { readonly type: "cancel" }
+  /** The page gained or lost keyboard focus; the workbench cannot see focus inside a webview. */
+  | { readonly type: "focusChanged"; readonly focused: boolean }
   | { readonly type: "command"; readonly command: StatusCommand };

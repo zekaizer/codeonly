@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { isCFamilyFile } from "../classify/cFamily";
 import { classifyRange, scanRegions } from "../classify/cLexer";
 import { REASON_COMMENT_ONLY, decideLine } from "../classify/lineDecision";
+import { compileGlobs } from "./glob";
 import type { FolderOptions, SearchQuery } from "./query";
 import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, queryErrorMessage, runRipgrep } from "./ripgrep";
 
@@ -50,6 +51,8 @@ export interface SearchRequest {
   /** Upper bound on shown matches; undefined for no bound. */
   readonly maxResults?: number;
   readonly signal?: AbortSignal;
+  /** Files for which this returns true are ignored: not read, reported, or counted. */
+  readonly skip?: (absolutePath: string) => boolean;
   /** Called once per file that had matches, including files whose lines were all excluded. */
   readonly onResult: (result: FileResult) => void;
 }
@@ -88,6 +91,10 @@ const UTF16 = "unclassifiable: UTF-16 file";
 
 /** Searches each folder with ripgrep and drops comment-only lines from C-family files. */
 export async function searchCode(request: SearchRequest): Promise<SearchSummary> {
+  if (request.query.isRegExp && hasNewlineEscape(request.query.pattern)) {
+    throw new SearchError("Multi-line patterns are not supported.");
+  }
+
   const started = performance.now();
   const { signal, maxResults } = request;
   const stop = new AbortController();
@@ -95,10 +102,6 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   signal?.addEventListener("abort", forwardAbort);
   if (signal?.aborted) {
     stop.abort();
-  }
-
-  if (request.query.isRegExp && hasNewlineEscape(request.query.pattern)) {
-    throw new SearchError("Multi-line patterns are not supported.");
   }
 
   let fileCount = 0;
@@ -141,13 +144,18 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
       }
       const pending = new Set<Promise<void>>();
       let sawFile = false;
+      const inScope = scopeFilter(request.query, folder.options);
       const exit = await runRipgrep(
         request.rgPath,
         buildRipgrepArgs(request.query, folder.options),
         folder.path,
         async (file) => {
           sawFile = true;
-          const task = processFile(folder.path, file).then(emit).catch(fail);
+          const relativePath = toRelativePath(file.path);
+          if (!inScope(relativePath) || request.skip?.(path.join(folder.path, relativePath))) {
+            return;
+          }
+          const task = processFile(folder.path, relativePath, file).then(emit).catch(fail);
           pending.add(task);
           void task.finally(() => pending.delete(task));
           if (pending.size >= FILE_CONCURRENCY) {
@@ -195,7 +203,25 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
 }
 
 /** `\n`, `\x0a`, `\x{a}`, `\u000a`, `\u{a}`, `\U0000000a`, `\012`, `\o{12}`, `\cJ`, after the backslash. */
-const NEWLINE_ESCAPE = /^(?:n|x0a|x\{0*a\}|u000a|u\{0*a\}|U0000000a|U\{0*a\}|012|o\{0*12\}|cj)/i;
+const NEWLINE_ESCAPE = /^(?:n|x0[aA]|x\{0*[aA]\}|u000[aA]|u\{0*[aA]\}|U0000000[aA]|U\{0*[aA]\}|012|o\{0*12\}|c[jJ])/;
+
+/**
+ * ripgrep's globs select the files to read, but its prefix globs for folder-relative includes
+ * (`src/**`) admit more than the include says. Like the Search view, results are therefore
+ * checked against the include and exclude globs again.
+ */
+function scopeFilter(query: SearchQuery, options: FolderOptions): (relativePath: string) => boolean {
+  const include = compileGlobs(query.includes, options.ignoreGlobCase);
+  const settingsExcludes = options.excludes.map((g) => g.replace(/\\/g, "/").replace(/(.)\/+$/, "$1"));
+  const exclude = compileGlobs([...settingsExcludes, ...query.excludes], options.ignoreGlobCase);
+  return (relativePath) => (!include || include(relativePath)) && !exclude?.(relativePath);
+}
+
+/** ripgrep prints paths below `.` with `./`; on Windows its separators are backslashes. */
+function toRelativePath(printed: string): string {
+  const p = process.platform === "win32" ? printed.replace(/\\/g, "/") : printed;
+  return p.replace(/^(\.\/)+/, "");
+}
 
 /**
  * Results are per line, so a pattern that must match a newline would silently find nothing.
@@ -260,8 +286,7 @@ function matchesOf(line: RipgrepLine): readonly Submatch[] {
   return [{ start: end, end }];
 }
 
-async function processFile(folder: string, file: RipgrepFile): Promise<FileResult> {
-  const relativePath = file.path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+async function processFile(folder: string, relativePath: string, file: RipgrepFile): Promise<FileResult> {
   const absolutePath = path.join(folder, relativePath);
   const base = { folder, relativePath, absolutePath };
   if (!isCFamilyFile(relativePath)) {

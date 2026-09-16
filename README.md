@@ -35,8 +35,8 @@ hidden.
 |---|---|
 | `Enter` | Search now and remember the term |
 | `Up` / `Down` | Previous / next remembered term |
-| `Alt+C` / `Alt+W` / `Alt+R` | Match Case / Match Whole Word / Use Regular Expression |
-| `Ctrl+Down` | Move to the results |
+| `Alt+C` / `Alt+W` / `Alt+R` (`Cmd+Alt+C/W/R` on macOS) | Match Case / Match Whole Word / Use Regular Expression |
+| `Ctrl+Down` (`Cmd+Down` on macOS) | Move to the results |
 | `Esc` | Stop the search |
 | `···` button | Show the *include* and *exclude* boxes |
 
@@ -45,8 +45,10 @@ view, for example `*.c, ./drivers/gpu` or `**/tests/**`. You can also
 right-click one or more folders in the Explorer and choose
 **Find Code in Folder (Exclude Comments)...**.
 
-In the results, click a line or press `Enter` to open the file with the match
-selected. Hover a result and click **×** to dismiss it. Right-click a result
+In the results, click a line or press `Enter` to preview the file with the
+match selected; do it again (or double-click) to keep the file open and move
+to the editor. `Ctrl+Up` (`Cmd+Up` on macOS) goes back to the search box.
+Hover a result and click **×** to dismiss it. Right-click a result
 for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
 While results are shown, the matches are also highlighted in open editors.
