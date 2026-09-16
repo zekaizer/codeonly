@@ -207,14 +207,13 @@ suite("search UI", () => {
     }
   });
 
-  test("opening the same result twice keeps the editor and moves focus to it", async () => {
+  test("results open through vscode.open, so VS Code applies the click or key gesture", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     const command = fileEntry(await api.resultTree(), "src/main.c").children[1].item.command;
-    assert.ok(command);
-    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
-    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, true);
-    await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
-    assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.isPreview, false);
+    assert.equal(command?.command, "vscode.open");
+    const [uri, options] = (command?.arguments ?? []) as [vscode.Uri, vscode.TextDocumentShowOptions];
+    assert.equal(uri.fsPath, path.join(FIXTURE, "src/main.c"));
+    assert.deepEqual(options, { selection: new vscode.Range(13, 12, 13, 24) });
   });
 
   test("errors point at the field they are about", async () => {
