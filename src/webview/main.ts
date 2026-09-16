@@ -286,6 +286,7 @@ window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
       break;
     }
     case "form":
+      historyIndex = -1;
       render(message.form);
       if (message.focus) {
         focusPattern();
