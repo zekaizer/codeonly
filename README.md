@@ -61,7 +61,9 @@ Comments are recognised in files that use C comment syntax:
 Matches in other files, such as `Makefile` or `Kconfig`, are listed as they
 are and marked *unfiltered*, so you do not lose usages there.
 
-Text inside string literals counts as code.
+Text inside string literals counts as code. In `.S` assembly files only C
+comments are recognised; matches in assembler comments (`#`, `@`) stay in the
+results.
 
 ## Settings
 
