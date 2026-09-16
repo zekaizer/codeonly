@@ -134,18 +134,21 @@ function toggle(button: HTMLButtonElement): void {
   }
 }
 
+/** Moves through history, skipping entries equal to the shown text; searches only if the text changed. */
 function browseHistory(direction: -1 | 1): void {
-  if (history.length === 0) {
-    return;
-  }
-  if (historyIndex === -1) {
+  const before = pattern.value;
+  let index = historyIndex;
+  if (index === -1) {
     if (direction === 1) {
       return;
     }
-    draft = pattern.value;
-    historyIndex = history.length;
+    draft = before;
+    index = history.length;
   }
-  const next = historyIndex + direction;
+  let next = index + direction;
+  while (next >= 0 && next < history.length && history[next] === before) {
+    next += direction;
+  }
   if (next < 0) {
     return;
   }
@@ -157,7 +160,9 @@ function browseHistory(direction: -1 | 1): void {
     pattern.value = history[next];
   }
   pattern.setSelectionRange(pattern.value.length, pattern.value.length);
-  edited();
+  if (pattern.value !== before) {
+    edited();
+  }
 }
 
 function focusPattern(): void {
