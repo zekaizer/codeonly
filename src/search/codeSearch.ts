@@ -88,6 +88,10 @@ const UTF16 = "unclassifiable: UTF-16 file";
 
 /** Searches each folder with ripgrep and drops comment-only lines from C-family files. */
 export async function searchCode(request: SearchRequest): Promise<SearchSummary> {
+  if (request.query.isRegExp && hasNewlineEscape(request.query.pattern)) {
+    throw new SearchError("Multi-line patterns are not supported.");
+  }
+
   const started = performance.now();
   const { signal, maxResults } = request;
   const stop = new AbortController();
@@ -95,10 +99,6 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
   signal?.addEventListener("abort", forwardAbort);
   if (signal?.aborted) {
     stop.abort();
-  }
-
-  if (request.query.isRegExp && hasNewlineEscape(request.query.pattern)) {
-    throw new SearchError("Multi-line patterns are not supported.");
   }
 
   let fileCount = 0;
