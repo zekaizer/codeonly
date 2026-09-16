@@ -177,6 +177,11 @@ suite("search UI", () => {
     assert.deepEqual(back?.args, { seed: false });
   });
 
+  test("the shortcut is not swallowed by the integrated terminal", () => {
+    const skip = vscode.workspace.getConfiguration("terminal.integrated").get<string[]>("commandsToSkipShell") ?? [];
+    assert.ok(skip.includes("codeonly.focusSearch"), JSON.stringify(skip));
+  });
+
   test("hasPattern follows the search term, and Search Again and Clear use it", async () => {
     await api.search({ ...base, pattern: "widget_count" });
     for (const entry of await api.resultTree()) {

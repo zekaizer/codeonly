@@ -251,7 +251,8 @@ document.addEventListener("keydown", (e) => {
   if (!modifiers || e.shiftKey || e.isComposing) {
     return;
   }
-  const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;
+  // keyCode follows the keyboard layout for Latin layouts, as VS Code's own keybindings do.
+  const button = e.keyCode === 67 ? caseToggle : e.keyCode === 87 ? wordToggle : e.keyCode === 82 ? regexToggle : undefined;
   if (button) {
     e.preventDefault();
     e.stopPropagation();

@@ -25,7 +25,10 @@ window connected to that remote so that it runs next to your files.
 
 Open **CodeOnly Search** from the activity bar, or press
 `Ctrl+Shift+Alt+F` (`Cmd+Shift+Alt+F` on macOS). The search box is filled
-with the editor selection, or with the word under the cursor.
+with the editor selection, or with the word under the cursor. The shortcut
+also works from the integrated terminal; if you have set
+`terminal.integrated.commandsToSkipShell` yourself, add
+`codeonly.focusSearch` to it.
 
 Results appear as you type, grouped by file. The line under the search box
 tells you how many results were found and how many comment-only lines were
