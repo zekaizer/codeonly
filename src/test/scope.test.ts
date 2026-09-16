@@ -96,19 +96,31 @@ suite("search scope (VS Code include/exclude semantics)", () => {
 
 suite("search path for an Explorer selection", () => {
   test("single root: a relative path with glob characters escaped", () => {
-    assert.equal(searchPathFor("/ws/src/a,b", single[0], false), "./src/a[,]b");
-    assert.equal(searchPathFor("/ws", single[0], false), "");
+    assert.equal(searchPathFor("/ws/src/a,b", single[0], single), "./src/a[,]b");
+    assert.equal(searchPathFor("/ws", single[0], single), "");
   });
 
   test("multi-root: prefixed with the folder name", () => {
-    assert.equal(searchPathFor("/root/a/src", multi[0], true), "./a/src");
-    assert.equal(searchPathFor("/root/b", multi[1], true), "./b");
+    assert.equal(searchPathFor("/root/a/src", multi[0], multi), "./a/src");
+    assert.equal(searchPathFor("/root/b", multi[1], multi), "./b");
+  });
+
+  test("multi-root folders with the same name are named by absolute path", () => {
+    const roots = [
+      { name: "drivers", path: "/a/drivers" },
+      { name: "drivers", path: "/b/drivers" },
+    ];
+    const gpu = searchPathFor("/a/drivers/gpu", roots[0], roots);
+    assert.equal(gpu, "/a/drivers/gpu");
+    assert.deepEqual(resolveScope(gpu, "", roots, HOME), [{ path: "/a/drivers/gpu", includes: [], excludes: [] }]);
+    const whole = searchPathFor("/b/drivers", roots[1], roots);
+    assert.deepEqual(resolveScope(whole, "", roots, HOME), [{ path: "/b/drivers", includes: [], excludes: [] }]);
   });
 
   test("multi-root folder names with glob characters fall back to an absolute path that still resolves", () => {
     const odd = { name: "a[1]", path: "/root/a[1]" };
     const roots = [odd, multi[1]];
-    const text = searchPathFor("/root/a[1]/src", odd, true);
+    const text = searchPathFor("/root/a[1]/src", odd, roots);
     assert.equal(text, "/root/a[[]1[]]/src");
     const [scoped] = resolveScope(text, "", roots, HOME);
     const matcher = compileGlobs(scoped.includes, false);

@@ -337,7 +337,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
 
   /** Scopes the query to `uris` (Explorer selection), each relative to its workspace folder. */
   async findInFolder(uris: readonly vscode.Uri[]): Promise<void> {
-    const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => ({ name: f.name, path: f.uri.fsPath }));
     const scopes: string[] = [];
     for (const uri of uris) {
       const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -347,7 +347,7 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       // A selected file stands for its folder, as in the Search view.
       const stat = await fs.promises.stat(uri.fsPath).catch(() => undefined);
       const target = stat?.isFile() ? path.dirname(uri.fsPath) : uri.fsPath;
-      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
+      const scope = searchPathFor(target, { name: folder.name, path: folder.uri.fsPath }, roots);
       if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;

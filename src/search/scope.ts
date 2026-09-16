@@ -25,15 +25,15 @@ export class ScopeError extends Error {
 
 /**
  * Include text that selects `target` (an Explorer selection inside `root`). In a multi-root
- * workspace a folder name with glob characters cannot be written as `./<name>`, so the absolute
- * path is used instead.
+ * workspace `./<name>` names the folder, unless another folder has the same name or the name has
+ * glob characters; then the absolute path is used, as the Search view does.
  */
-export function searchPathFor(target: string, root: WorkspaceRoot, multiRoot: boolean): string {
+export function searchPathFor(target: string, root: WorkspaceRoot, roots: readonly WorkspaceRoot[]): string {
   const rel = toSlash(path.relative(root.path, target));
-  if (!multiRoot) {
+  if (roots.length <= 1) {
     return rel ? `./${escapeGlob(rel)}` : "";
   }
-  if (/[*?[\]{}(),]/.test(root.name)) {
+  if (roots.filter((r) => r.name === root.name).length > 1 || /[*?[\]{}(),]/.test(root.name)) {
     return escapeGlob(toSlash(target));
   }
   return rel ? `./${root.name}/${escapeGlob(rel)}` : `./${root.name}`;
