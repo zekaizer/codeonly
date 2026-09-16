@@ -269,4 +269,13 @@ suite("code search pipeline edge cases", () => {
     assert.deepEqual(shown(o, "b.txt"), [1]);
   });
 
+  test("an unreadable path with no matches is a warning, not an error", async () => {
+    const dir = workspace({ "a.c": "int x;\n" });
+    fs.symlinkSync("/nonexistent-codeonly-target", path.join(dir, "dangling"));
+    const o = await run(dir, "zzz_no_match");
+    assert.equal(o.summary.matchCount, 0);
+    assert.equal(o.summary.warnings.length, 1);
+    assert.match(o.summary.warnings[0], /dangling/);
+  });
+
 });

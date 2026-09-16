@@ -4,7 +4,7 @@ import { isCFamilyFile } from "../classify/cFamily";
 import { classifyRange, scanRegions } from "../classify/cLexer";
 import { REASON_COMMENT_ONLY, decideLine } from "../classify/lineDecision";
 import type { FolderOptions, SearchQuery } from "./query";
-import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, runRipgrep, summarizeRipgrepError } from "./ripgrep";
+import { type RipgrepFile, type RipgrepLine, buildRipgrepArgs, queryErrorMessage, runRipgrep } from "./ripgrep";
 
 /** UTF-16 column range within {@link ResultLine.text}. */
 export interface ColumnRange {
@@ -154,8 +154,9 @@ export async function searchCode(request: SearchRequest): Promise<SearchSummary>
       await Promise.all(pending);
       if (!exit.aborted && exit.code !== 0 && exit.code !== 1) {
         const detail = exit.stderr.trim() || `ripgrep exited with code ${exit.code}`;
-        if (!sawFile) {
-          throw new SearchError(summarizeRipgrepError(detail), detail);
+        const queryError = queryErrorMessage(detail);
+        if (queryError && !sawFile) {
+          throw new SearchError(queryError, detail);
         }
         warnings.push(detail);
       }

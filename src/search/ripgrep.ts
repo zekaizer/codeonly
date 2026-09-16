@@ -259,17 +259,28 @@ interface RgMessage {
 
 const STDERR_LIMIT = 64 * 1024;
 
-/** Reduces ripgrep's stderr to one user-facing sentence. */
-export function summarizeRipgrepError(stderr: string): string {
+/**
+ * Returns a one-sentence message if ripgrep's stderr reports a problem with the query itself
+ * (pattern or glob), as VS Code distinguishes them; undefined for other errors, such as
+ * unreadable files, which do not invalidate the search.
+ */
+export function queryErrorMessage(stderr: string): string | undefined {
   if (/regex parse error/.test(stderr)) {
     const reason = /^error: (.+)$/m.exec(stderr)?.[1];
     return reason ? `Invalid regular expression: ${reason}` : "Invalid regular expression.";
   }
+  const pcre = /PCRE2: error compiling pattern.*$/m.exec(stderr)?.[0];
+  if (pcre) {
+    return `Invalid regular expression: ${pcre}`;
+  }
   if (/the literal "\\n" is not allowed/.test(stderr)) {
     return "Multi-line patterns are not supported.";
   }
-  const first = stderr.split("\n").find((l) => l.trim()) ?? "";
-  return first.replace(/^rg: /, "").trim() || "ripgrep failed.";
+  const glob = /error parsing glob.*$/m.exec(stderr)?.[0];
+  if (glob) {
+    return `Invalid file pattern: ${glob.replace(/^error parsing glob /, "")}`;
+  }
+  return undefined;
 }
 
 /**
