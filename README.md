@@ -50,8 +50,9 @@ right-click one or more folders in the Explorer and choose
 
 In the results, click a line to preview the file with the match selected.
 Double-click or press `Enter` to open it and move to the editor, and
-`Ctrl`-click (`Cmd`-click on macOS) to open it to the side. `Ctrl+Up`
-(`Cmd+Up` on macOS) goes back to the search box.
+`Ctrl`-click (`Cmd`-click on macOS) to open it to the side. With the
+keyboard, move with the arrow keys and press `Space` to preview a result or
+`Enter` to open it. `Ctrl+Up` (`Cmd+Up` on macOS) goes back to the search box.
 Hover a result and click **×** to dismiss it. Right-click a result
 for **Open to the Side**, **Copy**, **Copy Path**, and **Copy Relative Path**.
 
@@ -95,11 +96,16 @@ with VS Code. If it cannot be found, install
 `PATH` or set `codeonly.ripgrepPath`.
 
 **Only the first results are shown.** Searches stop at `search.maxResults`
-(20,000 by default). Narrow the search, or raise the limit.
+(20,000 by default). Narrow the search, or raise the limit. With a limit of
+several hundred thousand results, VS Code's extensions can stop responding
+for a while during a large search.
 
 ## Known limitations
 
 - Only C comment syntax is recognised.
+- Files are searched as saved on disk. Unsaved changes are not searched, and
+  results in a file you edit afterwards keep their old line numbers until you
+  search again.
 - A regular expression cannot match across lines, so `\n` and `\r` are
   rejected, and `\W` or `\s` do not match at the end of a line.
 - Files are read as UTF-8 or plain bytes; `files.encoding` is not applied.
