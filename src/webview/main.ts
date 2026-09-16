@@ -181,7 +181,7 @@ for (const input of [pattern, includes, excludes]) {
     edited();
   });
   input.addEventListener("keydown", (e) => {
-    if (e.isComposing) {
+    if (e.isComposing || e.keyCode === 229) {
       return;
     }
     if (e.key === "Enter") {
@@ -197,7 +197,7 @@ for (const input of [pattern, includes, excludes]) {
 }
 
 pattern.addEventListener("keydown", (e) => {
-  if (e.isComposing || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+  if (e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
     return;
   }
   if (e.key === "ArrowUp") {
@@ -228,7 +228,7 @@ formEl.addEventListener("submit", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) {
     return;
   }
   const button = e.code === "KeyC" ? caseToggle : e.code === "KeyW" ? wordToggle : e.code === "KeyR" ? regexToggle : undefined;
@@ -332,6 +332,8 @@ function line(): HTMLDivElement {
 }
 
 function renderStatus(status: SearchStatus): void {
+  // Screen readers hold announcements while busy, so progress updates are not read out one by one.
+  statusEl.setAttribute("aria-busy", String(status.kind === "searching"));
   statusEl.replaceChildren();
   statusEl.classList.toggle("error", status.kind === "error");
   patternField.classList.toggle("error", status.kind === "error");
