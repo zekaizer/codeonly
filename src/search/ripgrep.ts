@@ -299,6 +299,8 @@ export async function runRipgrep(
     child.once("error", reject);
     child.once("close", (code) => resolve(code));
   });
+  // A spawn failure rejects before `exited` is awaited below.
+  exited.catch(() => undefined);
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {

@@ -278,4 +278,24 @@ suite("code search pipeline edge cases", () => {
     assert.match(o.summary.warnings[0], /dangling/);
   });
 
+  test("a ripgrep that cannot start does not leave an unhandled rejection", async () => {
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await assert.rejects(
+        searchCode({
+          rgPath: "/nonexistent/rg",
+          query: { pattern: "x", isRegExp: false, isCaseSensitive: true, isWordMatch: false, includes: [], excludes: [] },
+          folders: [{ path: FIXTURE, options }],
+          onResult: () => undefined,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(seen, []);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
 });
