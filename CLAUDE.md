@@ -41,13 +41,13 @@ Each project lives in `intent/<project-name>/` and moves through fixed stages, o
 
 1. `intent.md` — problem, proposed outcome, constraints, out-of-scope (produced by the `intent-capture` skill)
 2. `spec.md` — confirmed facts (F), assumptions (A), requirements (R/NFR), interface contracts (IC), constraints (C), decisions (D), unverified items (U) (produced by the `spec-capture` skill)
-3. plan / ADR — next stage, not yet written; goes in `docs/adr/` per the global ADR rules
+3. `plan.md` — MVP scope, kickoff decisions (PD*), pipeline, verification matrix; ADRs for qualifying decisions go in `docs/adr/`
 
 Later stages cite earlier ones by ID (e.g. `R1'` traces to `P1`, `G1'`). Keep IDs stable when editing; a primed ID (`G1'`, `R1'`) marks a revised version of an earlier item.
 
 ## Project: codeonly
 
-Spec lives in `intent/vscode-search-exclude-comments/` (the pre-naming spec ID). Goal: VS Code global search (Ctrl+Shift+F) that drops result lines whose only matches are inside comments, primarily for C codebases. Stock VS Code cannot do this (spec F1, F2), so something must be built or attached; the mechanism is undecided and belongs to the plan/ADR stage.
+Spec lives in `intent/vscode-search-exclude-comments/` (the pre-naming spec ID). Goal: VS Code global search (Ctrl+Shift+F) that drops result lines whose only matches are inside comments, primarily for C codebases. Stock VS Code cannot do this (spec F1, F2); the MVP plan is in `plan.md` of the same directory.
 
 Decisions already fixed in `spec.md` that constrain any implementation:
 
@@ -56,7 +56,6 @@ Decisions already fixed in `spec.md` that constrain any implementation:
 - Mixed lines (`foo(); /* foo */`) are included (R2).
 - Search-panel flow must be preserved: term → result list → select → jump to file:line (C2, R5, IC1).
 - Must work under Remote-SSH / WSL / Dev Containers (R7).
-- Target scale is ~10⁵ files, kernel-tree sized (A3, NFR1'); latency bound D2 is still open (proposed 60 s).
+- Target scale is ~10⁵ files, kernel-tree sized (A3, NFR1'); latency bound D2 is 10 s with a warm cache.
 - Out of scope: in-file Ctrl+F, string-literal exclusion, Markdown search.
 
-Open items before kickoff: D2 (latency bound), D3 (diagnostic output channel), U3 (baseline search time measurement).

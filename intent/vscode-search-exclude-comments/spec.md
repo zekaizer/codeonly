@@ -17,7 +17,7 @@ F3. Under Remote-SSH, WSL, and Dev Containers, workspace extensions run on the r
 ## 4. Assumptions
 A1. Roughly half of search results are comment matches. (evidence: author's impression / verification: RISK1 / if wrong: re-evaluate the value of G1')
 A2. Occurs continuously during development. (evidence: author's impression / no verification needed; order of magnitude suffices)
-A3. The target codebase is on the order of 10⁵ files. (evidence: "about a kernel tree" / verification: run `find -name '*.[ch]' | wc -l` once / if wrong: revise the NFR1' target)
+A3. The target codebase is on the order of 10⁵ files. (evidence: "about a kernel tree" / verified 2026-09-17: android16-6.12 has 87,254 tracked files, 60,264 `.c`/`.h`)
 
 ## 5. Requirements
 ### Functional
@@ -46,13 +46,13 @@ OOS3. Markdown vault search. (user decision, intent)
 
 ## 9. Undecided
 D1. (decided) When comment classification is uncertain, a missed code match is preferable to a leftover comment match — exclude when uncertain. (user round 1)
-D2. Upper bound for NFR1' — decide at kickoff; proposed 60 s. (decider: user)
-D3. Diagnostic output channel (Output panel, log file, or inline in the result list) — decide at kickoff. (decider: user)
+D2. (decided) Upper bound for NFR1' is 10 s with a warm page cache. Basis: U3. (delegated to the implementer by the user, 2026-09-17)
+D3. (decided) Diagnostic output goes to the Output panel (`CodeOnly` log channel), enabled by a setting. (delegated to the implementer by the user, 2026-09-17)
 
 ## 10. Unverified + next actions
 U1. Measure the actual comment-match ratio — check: search three commonly used symbols, count the share of comment lines. Low priority.
-U3. Current global-search elapsed time — check: search `struct device` once in a kernel tree, record seconds ← top priority (input to D2)
 (U2 closed by user answer: acceptable wait is on the order of tens of seconds)
+(U3 closed 2026-09-17: ripgrep with VS Code's arguments, `struct device` on android16-6.12 — 3.5 s cold, 0.47 s warm; 12,326 files, 67,799 lines)
 
 ## 11. Discarded — wrong premises
 None.
