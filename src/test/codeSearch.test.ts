@@ -16,6 +16,7 @@ const options: FolderOptions = {
   useGlobalIgnoreFiles: false,
   followSymlinks: true,
   smartCase: false,
+  ignoreGlobCase: false,
 };
 
 interface Outcome {

@@ -18,6 +18,8 @@ export interface FolderOptions {
   readonly useGlobalIgnoreFiles: boolean;
   readonly followSymlinks: boolean;
   readonly smartCase: boolean;
+  /** Match globs and ignore files case-insensitively, for case-insensitive file systems. */
+  readonly ignoreGlobCase: boolean;
 }
 
 /** Escapes glob syntax in a literal path, so that it can go into a glob list. */

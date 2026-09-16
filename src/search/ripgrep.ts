@@ -12,6 +12,9 @@ import type { FolderOptions, SearchQuery } from "./query";
 export function buildRipgrepArgs(query: SearchQuery, options: FolderOptions): string[] {
   const args = ["--hidden", "--no-require-git"];
   args.push(isCaseSensitive(query, options.smartCase) ? "--case-sensitive" : "--ignore-case");
+  if (options.ignoreGlobCase) {
+    args.push("--glob-case-insensitive", "--ignore-file-case-insensitive");
+  }
   const includes = unique(query.includes.flatMap(expandSearchGlob));
   const rooted = includes.filter((g) => !g.startsWith("**"));
   if (rooted.length > 0) {

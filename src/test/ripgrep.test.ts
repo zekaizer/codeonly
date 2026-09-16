@@ -13,6 +13,7 @@ const folder: FolderOptions = {
   useGlobalIgnoreFiles: false,
   followSymlinks: true,
   smartCase: false,
+  ignoreGlobCase: false,
 };
 
 function query(pattern: string, overrides: Partial<SearchQuery> = {}): SearchQuery {
@@ -115,6 +116,12 @@ suite("ripgrep arguments", () => {
       "!**/.git",
     ]);
     assert.ok(!globs(buildRipgrepArgs(query("foo", { includes: ["*.c"] }), folder)).includes("!*"));
+  });
+
+  test("glob case follows the host file system", () => {
+    const insensitive = buildRipgrepArgs(query("foo"), { ...folder, ignoreGlobCase: true });
+    assert.deepEqual(insensitive.slice(2, 5), ["--ignore-case", "--glob-case-insensitive", "--ignore-file-case-insensitive"]);
+    assert.ok(!buildRipgrepArgs(query("foo"), folder).includes("--glob-case-insensitive"));
   });
 
   test("ignore-file and symlink settings", () => {
