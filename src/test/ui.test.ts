@@ -392,6 +392,35 @@ suite("search UI", () => {
     }
   });
 
+  test("window-scoped search settings are read without a folder, as VS Code expects", () => {
+    const workspace = vscode.workspace as { getConfiguration: typeof vscode.workspace.getConfiguration };
+    const original = workspace.getConfiguration;
+    const readWithFolder: string[] = [];
+    workspace.getConfiguration = (section, scope) => {
+      const config = original(section, scope);
+      if (!scope) {
+        return config;
+      }
+      return {
+        get: (key: string, fallback?: unknown) => {
+          readWithFolder.push(`${section}.${key}`);
+          return config.get(key, fallback);
+        },
+        has: (key: string) => config.has(key),
+        inspect: (key: string) => config.inspect(key),
+        update: (...args: Parameters<vscode.WorkspaceConfiguration["update"]>) => config.update(...args),
+      } as vscode.WorkspaceConfiguration;
+    };
+    try {
+      folderOptions(vscode.Uri.file(FIXTURE));
+    } finally {
+      workspace.getConfiguration = original;
+    }
+    assert.ok(readWithFolder.includes("search.exclude"), JSON.stringify(readWithFolder));
+    assert.ok(!readWithFolder.includes("search.followSymlinks"), JSON.stringify(readWithFolder));
+    assert.ok(!readWithFolder.includes("search.smartCase"), JSON.stringify(readWithFolder));
+  });
+
   test("dismiss removes a result and clear removes all", async () => {
     await api.search({ ...base, pattern: "widget_init" });
     const main = fileEntry(await api.resultTree(), "src/main.c");

@@ -7,6 +7,8 @@ export type CollapseMode = "auto" | "alwaysCollapse" | "alwaysExpand";
 /** Mirrors how the built-in Search view reads its settings for a folder. */
 export function folderOptions(uri: vscode.Uri): FolderOptions {
   const search = vscode.workspace.getConfiguration("search", uri);
+  // These two are window-scoped; VS Code logs a warning when they are read for a folder.
+  const windowSearch = vscode.workspace.getConfiguration("search");
   const files = vscode.workspace.getConfiguration("files", uri);
   // `search.exclude` wins, so `false` there re-includes what `files.exclude` hides.
   const excludes = enabledKeys({ ...asObject(files.get("exclude")), ...asObject(search.get("exclude")) });
@@ -15,8 +17,8 @@ export function folderOptions(uri: vscode.Uri): FolderOptions {
     useIgnoreFiles: search.get<boolean>("useIgnoreFiles", true),
     useParentIgnoreFiles: search.get<boolean>("useParentIgnoreFiles", false),
     useGlobalIgnoreFiles: search.get<boolean>("useGlobalIgnoreFiles", false),
-    followSymlinks: search.get<boolean>("followSymlinks", true),
-    smartCase: search.get<boolean>("smartCase", false),
+    followSymlinks: windowSearch.get<boolean>("followSymlinks", true),
+    smartCase: windowSearch.get<boolean>("smartCase", false),
     // VS Code decides this by the client OS; the file system's case rules are those of this host.
     ignoreGlobCase: process.platform !== "linux",
   };
