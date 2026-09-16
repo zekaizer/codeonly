@@ -2,9 +2,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { type FileResult, SearchError, type SearchFolder, type SearchSummary, searchCode } from "../search/codeSearch";
-import { type SearchQuery, escapeGlob } from "../search/query";
+import type { SearchQuery } from "../search/query";
 import { locateRipgrep } from "../search/ripgrep";
-import { ScopeError, type ScopedFolder, resolveScope } from "../search/scope";
+import { ScopeError, type ScopedFolder, resolveScope, searchPathFor } from "../search/scope";
 import { EMPTY_FORM, type QueryForm, type SearchStatus, type StatusCommand, type ToWebview } from "../shared/protocol";
 import { makePreview } from "./preview";
 import type { QueryViewHost } from "./queryView";
@@ -319,14 +319,13 @@ export class SearchController implements QueryViewHost, vscode.Disposable {
       if (!folder) {
         continue;
       }
-      const rel = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join("/");
-      const parts = [multiRoot ? folder.name : undefined, rel || undefined].filter((p): p is string => !!p);
-      if (parts.length === 0) {
+      const scope = searchPathFor(uri.fsPath, { name: folder.name, path: folder.uri.fsPath }, multiRoot);
+      if (!scope) {
         // The folder root itself: no restriction.
         scopes.length = 0;
         break;
       }
-      scopes.push(`./${escapeGlob(parts.join("/"))}`);
+      scopes.push(scope);
     }
     if (scopes.length === 0 && uris.every((u) => !vscode.workspace.getWorkspaceFolder(u))) {
       void vscode.window.showWarningMessage("CodeOnly can only search inside a workspace folder.");

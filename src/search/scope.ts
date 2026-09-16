@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { splitGlobList } from "./query";
+import { escapeGlob, splitGlobList } from "./query";
 
 export interface WorkspaceRoot {
   readonly name: string;
@@ -15,6 +15,22 @@ export interface ScopedFolder {
 
 /** The include or exclude text names something that does not exist. The message is user-facing. */
 export class ScopeError extends Error {}
+
+/**
+ * Include text that selects `target` (an Explorer selection inside `root`). In a multi-root
+ * workspace a folder name with glob characters cannot be written as `./<name>`, so the absolute
+ * path is used instead.
+ */
+export function searchPathFor(target: string, root: WorkspaceRoot, multiRoot: boolean): string {
+  const rel = toSlash(path.relative(root.path, target));
+  if (!multiRoot) {
+    return rel ? `./${escapeGlob(rel)}` : "";
+  }
+  if (/[*?[\]{}(),]/.test(root.name)) {
+    return escapeGlob(toSlash(target));
+  }
+  return rel ? `./${root.name}/${escapeGlob(rel)}` : `./${root.name}`;
+}
 
 interface SearchPath {
   readonly root: string;
